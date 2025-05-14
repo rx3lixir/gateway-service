@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package auth;
+option go_package = "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/auth;auth";
+
+import "google/protobuf/timestamp.proto";
+
+message SessionReq {
+  string id = 1;
+  string user_email = 2;
+  string refresh_token = 3;
+  bool is_revoked = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+message SessionRes {
+  string id = 1;
+  string user_email = 2;
+  string refresh_token = 3;
+  bool is_revoked = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+service AuthService {
+  rpc CreateSession(SessionReq) returns (SessionRes);
+  rpc GetSession(SessionReq) returns (SessionRes);
+  rpc RevokeSession(SessionReq) returns (SessionRes);
+  rpc DeleteSession(SessionReq) returns (SessionRes);
+}

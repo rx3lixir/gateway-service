@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package user;
+option go_package = "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/user;user";
+
+import "google/protobuf/timestamp.proto";
+
+message UserReq {
+  int64 id = 1;
+  string name = 2;
+  string email = 3;
+  string password = 4;
+  bool is_admin = 5;
+}
+
+message UserRes {
+  int64 id = 1;
+  string name = 2;
+  string email = 3;
+  string password = 4;
+  bool is_admin = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message ListUsersRes { repeated UserRes users = 1; }
+
+service UserService {
+  rpc CreateUser(UserReq) returns (UserRes);
+  rpc GetUser(UserReq) returns (UserRes);
+  rpc ListUsers(UserReq) returns (ListUsersRes);
+  rpc UpdateUser(UserReq) returns (UserRes);
+  rpc DeleteUser(UserReq) returns (UserRes);
+}

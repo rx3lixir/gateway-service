@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package event;
+option go_package = "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/event;event";
+
+import "google/protobuf/timestamp.proto";
+
+message EventReq {
+  int64 id = 1;
+  string name = 2;
+  string description = 3;
+  int64 categoryID = 4;
+  google.protobuf.Timestamp time = 5;
+  google.protobuf.Timestamp date = 6;
+  string location = 7;
+  float price = 8;
+  string image = 9;
+  string source = 10;
+}
+
+message EventRes {
+  int64 id = 1;
+  string name = 2;
+  string description = 3;
+  int64 categoryID = 4;
+  google.protobuf.Timestamp time = 5;
+  google.protobuf.Timestamp date = 6;
+  string location = 7;
+  float price = 8;
+  string image = 9;
+  string source = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+message ListEventsRes { repeated EventRes events = 1; }
+
+service EventService {
+  rpc CreateEvent(EventReq) returns (EventRes);
+  rpc GetEvent(EventReq) returns (EventRes);
+  rpc ListEvents(EventReq) returns (ListEventsRes);
+  rpc UpdateEvent(EventReq) returns (EventRes);
+  rpc DeleteEvent(EventReq) returns (EventRes);
+}
