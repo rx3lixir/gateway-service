@@ -9,13 +9,15 @@ import (
 	"strings"
 
 	pbEvent "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/event"
+	"github.com/rx3lixir/gateway-service/internal/token"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 type eventHandler struct {
-	client pbEvent.EventServiceClient
-	logger *slog.Logger
+	client     pbEvent.EventServiceClient
+	tokenMaker *token.JWTMaker
+	logger     *slog.Logger
 }
 
 func NewEventHandler(client pbEvent.EventServiceClient, ctx context.Context, log *slog.Logger) *eventHandler {

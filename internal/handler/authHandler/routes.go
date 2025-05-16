@@ -1,4 +1,4 @@
-package eventHandler
+package authhandler
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 // Структура для передачи в контекст
 type authContextKey struct{}
 
-func RegisterRoutes(e *eventHandler) *chi.Mux {
+func RegisterRoutes(a *authHandler) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Общие middleware
@@ -24,15 +24,16 @@ func RegisterRoutes(e *eventHandler) *chi.Mux {
 	r.Use(middleware.Timeout(30 * time.Second))
 
 	// API routes
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/events", e.makeHTTPHandlerFunc(e.handleGetEvents))
-		r.Get("/events/{id}", e.makeHTTPHandlerFunc(e.handleGetEventByID))
+	r.Route("/api/v1/auth", func(r chi.Router) {
+		// Публичные эндпоинты (не нужна аутентификация)
+		r.Post("/login", a.makeHTTPHandlerFunc(a.handleLogin))
+		r.Post("/refresh", a.makeHTTPHandlerFunc(a.handleRefreshToken))
 
+		// Защищенные эндпоинты (нужна аутентификация)
 		r.Group(func(r chi.Router) {
-			r.Use(e.adminMiddleware)
-			r.Delete("/events/{id}", e.makeHTTPHandlerFunc(e.handleDeleteEvent))
-			r.Put("/events/{id}", e.makeHTTPHandlerFunc(e.handleUpdateEvent))
-			r.Post("/events", e.makeHTTPHandlerFunc(e.handleCreateEvent))
+			r.Use(a.authMiddleware)
+			r.Post("/logout", a.makeHTTPHandlerFunc(a.handleLogout))
+			r.Post("/revoke", a.makeHTTPHandlerFunc(a.handleRevokeToken))
 		})
 	})
 
@@ -40,7 +41,7 @@ func RegisterRoutes(e *eventHandler) *chi.Mux {
 }
 
 // authMiddleware проверяет токен в заголовке Authorization
-func (h *eventHandler) authMiddleware(next http.Handler) http.Handler {
+func (h *authHandler) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Получаем заголовок Authorization
 		authHeader := r.Header.Get("Authorization")
@@ -73,7 +74,7 @@ func (h *eventHandler) authMiddleware(next http.Handler) http.Handler {
 }
 
 // adminMiddleware проверяет, является ли пользователь администратором
-func (h *eventHandler) adminMiddleware(next http.Handler) http.Handler {
+func (h *authHandler) adminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Получаем данные пользователя из контекста
 		claims, ok := r.Context().Value(authContextKey{}).(*token.UserClaims)
@@ -94,6 +95,7 @@ func (h *eventHandler) adminMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// Start запускает HTTP сервер
 func Start(addr string, router *chi.Mux) error {
 	server := &http.Server{
 		Addr:         addr,
@@ -106,11 +108,12 @@ func Start(addr string, router *chi.Mux) error {
 	return server.ListenAndServe()
 }
 
+// GracefulShutdown выполняет корректное завершение работы сервера
 func GracefulShutdown(ctx context.Context, server *http.Server) {
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error("Failed to graceful shutdown server", "error", err)
+		slog.Error("Failed to gracefully shutdown server", "error", err)
 	}
 }
