@@ -2,7 +2,7 @@
 # CONFIGURATION
 # ============================================================================
 
-BINARY_NAME=event-service
+BINARY_NAME=gateway-service
 MIGRATIONS_PATH=internal/db/migrations
 DB_URL=postgres://rx3lixir:password@localhost:5432/aggregator?sslmode=disable
 
@@ -24,7 +24,7 @@ all: build ## Default build command
 
 build: ## Build the binary
 	@echo "🔨 Building..."
-	go build -o ./bin/$(BINARY_NAME) ./cmd/api/main.go
+	go build -o ./bin/$(BINARY_NAME) ./cmd/gateway/main.go
 
 run: build ## Build and run the app
 	@echo "🚀 Running..."

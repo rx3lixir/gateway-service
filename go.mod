@@ -3,6 +3,7 @@ module github.com/rx3lixir/gateway-service
 go 1.24.3
 
 require (
+	github.com/go-chi/chi/v5 v5.2.1
 	github.com/ianschenck/envflag v0.0.0-20140720210342-9111d830d133
 	google.golang.org/grpc v1.72.0
 	google.golang.org/protobuf v1.36.5
