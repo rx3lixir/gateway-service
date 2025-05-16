@@ -7,9 +7,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ianschenck/envflag"
+	pbAuth "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/auth"
 	pbEvent "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/event"
+
+	"github.com/rx3lixir/gateway-service/internal/handler/authHandler"
 	"github.com/rx3lixir/gateway-service/internal/handler/eventHandler"
+
+	"github.com/ianschenck/envflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -51,13 +55,15 @@ func main() {
 	logger.Info("Connected to gRPC event service")
 
 	// Создание gRPC клиента
-	client := pbEvent.NewEventServiceClient(conn)
+	eventClient := pbEvent.NewEventServiceClient(conn)
+	authClient := pbAuth.NewAuthServiceClient(conn)
 
 	// Создание обработчика событий
-	hdl := eventHandler.NewEventHandler(client, ctx, logger)
+	eHandler := eventHandler.NewEventHandler(eventClient, ctx, logger)
+	aHandler := authhandler.NewAuthHandler(authClient, ctx, logger)
 
 	// Регистрация маршрутов
-	router := eventHandler.RegisterRoutes(hdl)
+	eventRoutes := eventHandler.RegisterRoutes(eHandler)
 
 	// Перехват сигналов для graceful shutdown
 	sigCh := make(chan os.Signal, 1)
@@ -66,7 +72,7 @@ func main() {
 	// Запуск HTTP сервера в отдельной горутине
 	go func() {
 		logger.Info("Starting HTTP server", "port", *httpPort)
-		if err := eventHandler.Start(*httpPort, router); err != nil {
+		if err := eventHandler.Start(*httpPort, eventRoutes); err != nil {
 			logger.Error("HTTP server failed", "error", err)
 			cancel()
 		}

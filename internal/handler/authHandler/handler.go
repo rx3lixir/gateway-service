@@ -26,7 +26,7 @@ type authHandler struct {
 	ctx        context.Context
 }
 
-func NewEventHandler(client pbAuth.AuthServiceClient, ctx context.Context, log *slog.Logger) *authHandler {
+func NewAuthHandler(client pbAuth.AuthServiceClient, ctx context.Context, log *slog.Logger) *authHandler {
 	return &authHandler{
 		authClient: client,
 		logger:     log,
