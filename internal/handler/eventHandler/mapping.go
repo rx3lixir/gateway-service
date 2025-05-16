@@ -6,7 +6,8 @@ import (
 	pbEvent "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/event"
 )
 
-// HTTPCreateReqToProtoCreateEventReq конвертирует models.CreateEventReq (шлюз) в pbEvent.CreateEventReq (gRPC).
+// HTTPCreateReqToProtoCreateEventReq конвертирует
+// CreateEventReq (шлюз) в pbEvent.CreateEventReq (gRPC).
 func HTTPCreateReqToProtoCreateEventReq(req *CreateEventReq) *pbEvent.CreateEventReq {
 	if req == nil {
 		return nil
@@ -19,17 +20,16 @@ func HTTPCreateReqToProtoCreateEventReq(req *CreateEventReq) *pbEvent.CreateEven
 		Date:        req.Date,
 		Time:        req.Time,
 		Location:    req.Location,
-		Price:       req.Price, // proto float (в .proto файле) это float32 в Go
+		Price:       req.Price,
 		Image:       req.Image,
 		Source:      req.Source,
 	}
 }
 
-// HTTPUpdateReqToProtoUpdateEventReq конвертирует models.UpdateEventReq (шлюз) и ID в pbEvent.UpdateEventReq (gRPC).
+// HTTPUpdateReqToProtoUpdateEventReq конвертирует UpdateEventReq (шлюз)
+// и ID в pbEvent.UpdateEventReq (gRPC).
 func HTTPUpdateReqToProtoUpdateEventReq(id int64, req *UpdateEventReq) *pbEvent.UpdateEventReq {
 	if req == nil {
-		// Если тело запроса пустое, это может быть ошибкой, но для примера создадим запрос только с ID.
-		// Лучше добавить валидацию на уровне HTTP хендлера.
 		return &pbEvent.UpdateEventReq{Id: id}
 	}
 
@@ -41,18 +41,20 @@ func HTTPUpdateReqToProtoUpdateEventReq(id int64, req *UpdateEventReq) *pbEvent.
 		Date:        req.Date,
 		Time:        req.Time,
 		Location:    req.Location,
-		Price:       req.Price, // proto float это float32 в Go
+		Price:       req.Price,
 		Image:       req.Image,
 		Source:      req.Source,
 	}
 }
 
-// ProtoEventResToHTTPEvent конвертирует pbEvent.EventRes (gRPC) в models.Event (шлюз).
+// ProtoEventResToHTTPEvent конвертирует pbEvent.EventRes (gRPC)
+// Event (шлюз).
 func ProtoEventResToHTTPEvent(protoEvent *pbEvent.EventRes) *Event {
 	if protoEvent == nil {
 		return nil
 	}
 
+	// Обработка времени обновления
 	var updatedAt *time.Time
 	if protoEvent.GetUpdatedAt() != nil && protoEvent.GetUpdatedAt().IsValid() {
 		t := protoEvent.GetUpdatedAt().AsTime()
@@ -63,7 +65,8 @@ func ProtoEventResToHTTPEvent(protoEvent *pbEvent.EventRes) *Event {
 	if protoEvent.GetUpdatedAt() != nil && protoEvent.GetCreatedAt().IsValid() {
 		createdAt = protoEvent.GetCreatedAt().AsTime()
 	} else {
-		return nil
+		// Если createdAt не установлен, используем текущее время
+		createdAt = time.Now()
 	}
 
 	return &Event{
@@ -74,7 +77,7 @@ func ProtoEventResToHTTPEvent(protoEvent *pbEvent.EventRes) *Event {
 		Date:        protoEvent.GetDate(),
 		Time:        protoEvent.GetTime(),
 		Location:    protoEvent.GetLocation(),
-		Price:       protoEvent.GetPrice(), // proto float это float32 в Go
+		Price:       protoEvent.GetPrice(),
 		Image:       protoEvent.GetImage(),
 		Source:      protoEvent.GetSource(),
 		CreatedAt:   createdAt,
@@ -82,7 +85,8 @@ func ProtoEventResToHTTPEvent(protoEvent *pbEvent.EventRes) *Event {
 	}
 }
 
-// ProtoEventsListToHTTPEventsList конвертирует []*pbEvent.EventRes (gRPC) в []*models.Event (шлюз).
+// ProtoEventsListToHTTPEventsList конвертирует []*pbEvent.EventRes (gRPC)
+// в []*Event (шлюз).
 func ProtoEventsListToHTTPEventsList(protoEvents []*pbEvent.EventRes) []*Event {
 	if protoEvents == nil {
 		return []*Event{} // Возвращаем пустой слайс, а не nil, для консистентности JSON
@@ -113,4 +117,18 @@ func IDToProtoDeleteEventReq(id int64) *pbEvent.DeleteEventReq {
 func NoParamsToProtoEventsListReq() *pbEvent.ListEventsReq {
 	// Предполагается, что ListEventsReq в вашем .proto файле пуст или не требует обязательных полей.
 	return &pbEvent.ListEventsReq{}
+}
+
+// CategoryIDToProtoEventsListReq создает pbEvent.ListEventsReq с фильтром по категории.
+func CategoryIDToProtoEventsListReq(categoryID int64) *pbEvent.ListEventsReq {
+	return &pbEvent.ListEventsReq{
+		CategoryID: &categoryID,
+	}
+}
+
+// DateToProtoEventsListReq создает pbEvent.ListEventsReq с фильтром по дате.
+func DateToProtoEventsListReq(date string) *pbEvent.ListEventsReq {
+	return &pbEvent.ListEventsReq{
+		Date: &date,
+	}
 }

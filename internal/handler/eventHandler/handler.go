@@ -27,27 +27,57 @@ func NewEventHandler(client pbEvent.EventServiceClient, ctx context.Context, log
 
 // handleGetEvents возвращает информацию обо всех событиях
 func (h *eventHandler) handleGetEvents(w http.ResponseWriter, r *http.Request) error {
+	h.logger.InfoContext(r.Context(), "Handling request to list events")
+
+	// Получаем параметры запроса
+	categoryIdParam := r.URL.Query().Get("category_id")
+	dateParam := r.URL.Query().Get("date")
+
+	var listEventsReq *pbEvent.ListEventsReq
+
+	// Создаем соответствующий gRPC запрос в зависимости от параметров
+	if categoryIdParam != "" {
+		categoryID, err := parseInt64(categoryIdParam)
+		if err != nil {
+			h.logger.WarnContext(r.Context(), "Invalid category_id parameter", "value", categoryIdParam, "error", err)
+			return fmt.Errorf("invalid category_id parameter: %w", err)
+		}
+		listEventsReq = CategoryIDToProtoEventsListReq(categoryID)
+	} else if dateParam != "" {
+		listEventsReq = DateToProtoEventsListReq(dateParam)
+		h.logger.InfoContext(r.Context(), "Filtering events by date", "date", dateParam)
+	} else {
+		listEventsReq = NoParamsToProtoEventsListReq()
+		h.logger.InfoContext(r.Context(), "Requesting all events (no filters)")
+	}
+
+	// Создаем gRPC контекст
 	grpcCtx, cancel := h.createContext(r)
 	defer cancel()
 
-	listEventsReq := NoParamsToProtoEventsListReq()
-
-	// Предполагается, что ваш .proto для ListEvents и GetEventsByCategory возвращает ListEventsRes
-	// message ListEventsRes { repeated EventRes events = 1; }
-	// message GetEventsByCategoryRes { repeated EventRes events = 1; }
-	// или они оба используют общий тип, например EventsList { repeated EventRes events = 1; }
-	// В вашем серверном коде это DBEventsToProtoEventsList, что намекает на список событий.
-
+	h.logger.InfoContext(grpcCtx, "Sending ListEvents request to gRPC service")
 	res, err := h.client.ListEvents(grpcCtx, listEventsReq)
 	if err != nil {
 		h.logger.ErrorContext(grpcCtx, "Failed to list events via gRPC", "error", err)
 		return err
 	}
 
-	httpEvents := ProtoEventsListToHTTPEventsList(res.GetEvents())
-	if httpEvents == nil { // Гарантируем, что не nil, а пустой слайс для JSON
-		httpEvents = []*Event{}
+	eventsCount := 0
+	if res != nil && res.Events != nil {
+		eventsCount = len(res.Events)
 	}
+	h.logger.InfoContext(grpcCtx, "Received events from gRPC service", "count", eventsCount)
+
+	// Если результат получен, но в нем пусто
+	if res != nil && (res.Events == nil || len(res.Events) == 0) {
+		h.logger.InfoContext(grpcCtx, "No events found")
+		return WriteJSON(w, http.StatusOK, []*Event{})
+	}
+
+	httpEvents := ProtoEventsListToHTTPEventsList(res.GetEvents())
+
+	h.logger.InfoContext(grpcCtx, "Converted  to HTTP events", "count", len(httpEvents))
+
 	return WriteJSON(w, http.StatusOK, httpEvents)
 }
 
@@ -55,13 +85,18 @@ func (h *eventHandler) handleGetEvents(w http.ResponseWriter, r *http.Request) e
 func (h *eventHandler) handleGetEventByID(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseIDFromURL(r, "id")
 	if err != nil {
+		h.logger.WarnContext(r.Context(), "Failed to parse ID from URL", "error", err)
 		return err
 	}
+
+	h.logger.InfoContext(r.Context(), "Handling request to get event by ID", "id", id)
 
 	grpcCtx, cancel := h.createContext(r)
 	defer cancel()
 
 	getEventReq := IDToProtoGetEventByIDReq(id)
+
+	h.logger.InfoContext(grpcCtx, "Sending GetEvent request to gRPC service", "id", id)
 
 	protoEvent, err := h.client.GetEvent(grpcCtx, getEventReq)
 	if err != nil {
@@ -69,9 +104,20 @@ func (h *eventHandler) handleGetEventByID(w http.ResponseWriter, r *http.Request
 		return err
 	}
 
+	if protoEvent == nil {
+		h.logger.WarnContext(grpcCtx, "Received nil event from gRPC service", "id", id)
+		return status.Error(codes.NotFound, fmt.Sprintf("event with id %d not found", id))
+	}
+
+	h.logger.InfoContext(grpcCtx, "Received event from gRPC service",
+		"id", protoEvent.GetId(),
+		"name", protoEvent.GetName())
+
 	httpEvent := ProtoEventResToHTTPEvent(protoEvent)
+
 	if httpEvent == nil {
-		return status.Error(codes.NotFound, "event not found after gRPC call")
+		h.logger.ErrorContext(grpcCtx, "Failed to convert Proto event to HTTP event", "id", id)
+		return status.Error(codes.Internal, "error converting event data")
 	}
 	return WriteJSON(w, http.StatusOK, httpEvent)
 }
@@ -81,17 +127,22 @@ func (h *eventHandler) handleCreateEvent(w http.ResponseWriter, r *http.Request)
 	var createEventReq CreateEventReq
 
 	if err := json.NewDecoder(r.Body).Decode(&createEventReq); err != nil {
-		h.logger.Error("Failed to decode create event request", "error", err)
+		h.logger.WarnContext(r.Context(), "Failed to decode create event request", "error", err)
 		return fmt.Errorf("invalid request body: %w", err)
 	}
 	defer r.Body.Close()
 
+	// Подробное логирование полученных данных
+	h.logger.InfoContext(r.Context(), "Received event creation data",
+		"name", createEventReq.Name,
+		"category_id", createEventReq.CategoryID,
+		"date", createEventReq.Date)
+
 	// Базовая валидация (можно расширить с помощью библиотеки валидации)
 	if strings.TrimSpace(createEventReq.Name) == "" {
+		h.logger.WarnContext(r.Context(), "Event validation failed", "reason", "empty name")
 		return fmt.Errorf("event name is required")
 	}
-
-	// ТУДУ: добавить валидацию через библиотеки
 
 	grpcCtx, cancel := h.createContext(r)
 	defer cancel()
@@ -99,13 +150,22 @@ func (h *eventHandler) handleCreateEvent(w http.ResponseWriter, r *http.Request)
 	// ебать это что за название надо переделать
 	protoReq := HTTPCreateReqToProtoCreateEventReq(&createEventReq)
 
+	h.logger.InfoContext(grpcCtx, "Sending CreateEvent request to gRPC service")
+
 	createdEvent, err := h.client.CreateEvent(grpcCtx, protoReq)
 	if err != nil {
-		h.logger.ErrorContext(grpcCtx, "Failed to create event", "request_name", createEventReq.Name, "error", err)
+		h.logger.ErrorContext(grpcCtx, "Failed to create event via gRPC",
+			"name", createEventReq.Name,
+			"error", err)
 		return err
 	}
 
+	h.logger.InfoContext(grpcCtx, "Event created successfully",
+		"id", createdEvent.GetId(),
+		"name", createdEvent.GetName())
+
 	httpEvent := ProtoEventResToHTTPEvent(createdEvent)
+
 	return WriteJSON(w, http.StatusCreated, httpEvent)
 }
 
@@ -113,27 +173,40 @@ func (h *eventHandler) handleCreateEvent(w http.ResponseWriter, r *http.Request)
 func (h *eventHandler) handleUpdateEvent(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseIDFromURL(r, "id")
 	if err != nil {
+		h.logger.WarnContext(r.Context(), "Failed to parse ID from URL", "error", err)
 		return err
 	}
+
+	h.logger.InfoContext(r.Context(), "Handling request to update event", "id", id)
 
 	var updateEventReq UpdateEventReq
 
 	if err := json.NewDecoder(r.Body).Decode(&updateEventReq); err != nil {
-		h.logger.Error("Failed to decode update event request", "error", err)
+		h.logger.WarnContext(r.Context(), "Failed to decode update event request", "error", err)
 		return fmt.Errorf("Invalid request body: %w", err)
 	}
 	defer r.Body.Close()
+
+	h.logger.InfoContext(r.Context(), "Received event update data",
+		"id", id,
+		"name", updateEventReq.Name)
 
 	grpcCtx, cancel := h.createContext(r)
 	defer cancel()
 
 	protoReq := HTTPUpdateReqToProtoUpdateEventReq(id, &updateEventReq)
 
+	h.logger.InfoContext(grpcCtx, "Sending UpdateEvent request to gRPC service", "id", id)
+
 	updatedEvent, err := h.client.UpdateEvent(grpcCtx, protoReq)
 	if err != nil {
 		h.logger.ErrorContext(grpcCtx, "Failed to update event via gRPC", "id", id, "error", err)
 		return err
 	}
+
+	h.logger.InfoContext(grpcCtx, "Event updated successfully",
+		"id", updatedEvent.GetId(),
+		"name", updatedEvent.GetName())
 
 	httpEvent := ProtoEventResToHTTPEvent(updatedEvent)
 	return WriteJSON(w, http.StatusOK, httpEvent)
@@ -143,21 +216,26 @@ func (h *eventHandler) handleUpdateEvent(w http.ResponseWriter, r *http.Request)
 func (h *eventHandler) handleDeleteEvent(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseIDFromURL(r, "id")
 	if err != nil {
+		h.logger.WarnContext(r.Context(), "Failed to parse ID from URL", "error", err)
 		return err
 	}
+
+	h.logger.InfoContext(r.Context(), "Handling request to delete event", "id", id)
 
 	grpcCtx, cancel := h.createContext(r)
 	defer cancel()
 
 	deleteReq := IDToProtoDeleteEventReq(id)
 
-	// Предполагаем, что DeleteEvent возвращает google.protobuf.Empty или аналогичный пустой ответ.
-	// Если ваш DeleteEvent возвращает что-то (например, подтверждение), его нужно будет обработать.
+	h.logger.InfoContext(grpcCtx, "Sending DeleteEvent request to gRPC service", "id", id)
+
 	_, err = h.client.DeleteEvent(grpcCtx, deleteReq)
 	if err != nil {
 		h.logger.ErrorContext(grpcCtx, "Failed to delete event via gRPC", "id", id, "error", err)
 		return err
 	}
+
+	h.logger.InfoContext(grpcCtx, "Event deleted successfully", "id", id)
 
 	// Можно вернуть 204 No Content или сообщение об успехе
 	// return WriteJSON(w, http.StatusNoContent, nil)

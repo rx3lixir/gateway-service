@@ -19,6 +19,15 @@ type APIError struct {
 	Error string `json:"error"`
 }
 
+// parseInt64 преобразует строку в int64 для использования в запросах
+func parseInt64(s string) (int64, error) {
+	i, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return i, nil
+}
+
 // WriteJSON отправляет данные в формате JSON с указанным HTTP статусом.
 // Автоматически устанавливает правильный Content-Type заголовок.
 func WriteJSON(w http.ResponseWriter, statusCode int, data interface{}) error {
