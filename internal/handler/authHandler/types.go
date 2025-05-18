@@ -16,7 +16,7 @@ type User struct {
 	ID       int64  `json:"id"`
 	Name     string `json:"name"`
 	Email    string `json:"email"`
-	Password string `json:"-"` // Не показываем в JSON
+	Password string `json:"password"` // Не показываем в JSON
 	IsAdmin  bool   `json:"is_admin"`
 }
 

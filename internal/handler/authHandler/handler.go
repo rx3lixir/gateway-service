@@ -66,10 +66,11 @@ func (h *authHandler) handleLogin(w http.ResponseWriter, r *http.Request) error 
 		}
 		return err
 	}
+	h.logger.InfoContext(grpcCtx, "Got user", "email", user.Email, "password", user.Password)
 
 	ok := password.Verify(loginRequest.Password, user.Password)
 	if !ok {
-		h.logger.WarnContext(grpcCtx, "Invalid password attempt", "email", loginRequest.Email)
+		h.logger.WarnContext(grpcCtx, "Invalid password attempt", "email", loginRequest.Email, "pass", loginRequest.Password)
 		return fmt.Errorf("invalid credentials")
 	}
 
