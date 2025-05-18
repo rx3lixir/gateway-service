@@ -1,12 +1,15 @@
-package authhandler
+package userhandler
 
 import (
+	"github.com/go-chi/chi/v5"
 	"google.golang.org/grpc/codes"  // Для кодов gRPC ошибо
 	"google.golang.org/grpc/status" // Для обработки gRPC ошибок
 
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -14,6 +17,15 @@ import (
 // APIError представляет структуру ошибки для ответов API.
 type APIError struct {
 	Error string `json:"error"`
+}
+
+// parseInt64 преобразует строку в int64 для использования в запросах
+func parseInt64(s string) (int64, error) {
+	i, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return i, nil
 }
 
 // WriteJSON отправляет данные в формате JSON с указанным HTTP статусом.
@@ -42,7 +54,7 @@ type apiFunc func(w http.ResponseWriter, r *http.Request) error
 
 // makeHTTPHandleFunc преобразует apiFunc в стандартный http.HandlerFunc,
 // добавляя унифицированную обработку ошибок.
-func (h *authHandler) makeHTTPHandlerFunc(f apiFunc) http.HandlerFunc {
+func (h *userHandler) makeHTTPHandlerFunc(f apiFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := f(w, r); err != nil {
 			// Обработка gRPC ошибок
@@ -78,11 +90,6 @@ func (h *authHandler) makeHTTPHandlerFunc(f apiFunc) http.HandlerFunc {
 				return
 			}
 
-			if strings.Contains(errStr, "unauthorized") || strings.Contains(errStr, "unauthenticated") {
-				WriteJSON(w, http.StatusUnauthorized, APIError{Error: "Unauthorized"})
-				return
-			}
-
 			// Если ошибка содержит "not found" (из старого кода, но лучше полагаться на gRPC codes.NotFound)
 			if strings.Contains(errStr, "not found") {
 				WriteJSON(w, http.StatusNotFound, APIError{Error: err.Error()})
@@ -95,8 +102,21 @@ func (h *authHandler) makeHTTPHandlerFunc(f apiFunc) http.HandlerFunc {
 	}
 }
 
+// parseIDFromURL извлекает и валидирует ID из URL. Изменен на int64.
+func parseIDFromURL(r *http.Request, paramName string) (int64, error) {
+	idParam := chi.URLParam(r, paramName)
+	id, err := strconv.ParseInt(idParam, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s format: %v", paramName, idParam)
+	}
+	if id <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer, got %d", paramName, id)
+	}
+	return id, nil
+}
+
 // createContext создает дочерний контекст с таймаутом для gRPC вызова.
-func (h *authHandler) createContext(r *http.Request) (context.Context, context.CancelFunc) {
+func (h *userHandler) createContext(r *http.Request) (context.Context, context.CancelFunc) {
 	// Установите подходящий таймаут для ваших gRPC вызовов
 	return context.WithTimeout(r.Context(), 5*time.Second)
 }

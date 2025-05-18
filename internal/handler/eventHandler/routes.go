@@ -2,14 +2,13 @@ package eventHandler
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/rx3lixir/gateway-service/internal/token"
+	"github.com/rx3lixir/gateway-service/pkg/token"
 )
 
 // Структура для передачи в контекст
@@ -92,25 +91,4 @@ func (h *eventHandler) adminMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-func Start(addr string, router *chi.Mux) error {
-	server := &http.Server{
-		Addr:         addr,
-		Handler:      router,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
-
-	return server.ListenAndServe()
-}
-
-func GracefulShutdown(ctx context.Context, server *http.Server) {
-	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error("Failed to graceful shutdown server", "error", err)
-	}
 }

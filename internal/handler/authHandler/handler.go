@@ -1,7 +1,6 @@
 package authhandler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,8 +11,8 @@ import (
 	pbAuth "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/auth"
 	pbUser "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/user"
 
-	"github.com/rx3lixir/gateway-service/internal/token"
 	"github.com/rx3lixir/gateway-service/pkg/password"
+	"github.com/rx3lixir/gateway-service/pkg/token"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -23,12 +22,13 @@ type authHandler struct {
 	userClient pbUser.UserServiceClient
 	tokenMaker *token.JWTMaker
 	logger     *slog.Logger
-	ctx        context.Context
 }
 
-func NewAuthHandler(client pbAuth.AuthServiceClient, ctx context.Context, log *slog.Logger) *authHandler {
+func NewAuthHandler(authClient pbAuth.AuthServiceClient, userClient pbUser.UserServiceClient, secretKey string, log *slog.Logger) *authHandler {
 	return &authHandler{
-		authClient: client,
+		authClient: authClient,
+		userClient: userClient,
+		tokenMaker: token.NewJWTMaker(secretKey),
 		logger:     log,
 	}
 }

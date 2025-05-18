@@ -1,7 +1,6 @@
 package eventHandler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -9,21 +8,22 @@ import (
 	"strings"
 
 	pbEvent "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/event"
-	"github.com/rx3lixir/gateway-service/internal/token"
+	"github.com/rx3lixir/gateway-service/pkg/token"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 type eventHandler struct {
-	client     pbEvent.EventServiceClient
-	tokenMaker *token.JWTMaker
-	logger     *slog.Logger
+	eventClient pbEvent.EventServiceClient
+	tokenMaker  *token.JWTMaker
+	logger      *slog.Logger
 }
 
-func NewEventHandler(client pbEvent.EventServiceClient, ctx context.Context, log *slog.Logger) *eventHandler {
+func NewEventHandler(eventClient pbEvent.EventServiceClient, secretKey string, log *slog.Logger) *eventHandler {
 	return &eventHandler{
-		client: client,
-		logger: log,
+		eventClient: eventClient,
+		tokenMaker:  token.NewJWTMaker(secretKey),
+		logger:      log,
 	}
 }
 
@@ -58,7 +58,7 @@ func (h *eventHandler) handleGetEvents(w http.ResponseWriter, r *http.Request) e
 	defer cancel()
 
 	h.logger.InfoContext(grpcCtx, "Sending ListEvents request to gRPC service")
-	res, err := h.client.ListEvents(grpcCtx, listEventsReq)
+	res, err := h.eventClient.ListEvents(grpcCtx, listEventsReq)
 	if err != nil {
 		h.logger.ErrorContext(grpcCtx, "Failed to list events via gRPC", "error", err)
 		return err
@@ -100,7 +100,7 @@ func (h *eventHandler) handleGetEventByID(w http.ResponseWriter, r *http.Request
 
 	h.logger.InfoContext(grpcCtx, "Sending GetEvent request to gRPC service", "id", id)
 
-	protoEvent, err := h.client.GetEvent(grpcCtx, getEventReq)
+	protoEvent, err := h.eventClient.GetEvent(grpcCtx, getEventReq)
 	if err != nil {
 		h.logger.ErrorContext(grpcCtx, "Failed to get event by ID via gRPC", "id", id, "error", err)
 		return err
@@ -128,6 +128,7 @@ func (h *eventHandler) handleGetEventByID(w http.ResponseWriter, r *http.Request
 func (h *eventHandler) handleCreateEvent(w http.ResponseWriter, r *http.Request) error {
 	var createEventReq CreateEventReq
 
+	// Декодинг полученного ивента
 	if err := json.NewDecoder(r.Body).Decode(&createEventReq); err != nil {
 		h.logger.WarnContext(r.Context(), "Failed to decode create event request", "error", err)
 		return fmt.Errorf("invalid request body: %w", err)
@@ -154,7 +155,7 @@ func (h *eventHandler) handleCreateEvent(w http.ResponseWriter, r *http.Request)
 
 	h.logger.InfoContext(grpcCtx, "Sending CreateEvent request to gRPC service")
 
-	createdEvent, err := h.client.CreateEvent(grpcCtx, protoReq)
+	createdEvent, err := h.eventClient.CreateEvent(grpcCtx, protoReq)
 	if err != nil {
 		h.logger.ErrorContext(grpcCtx, "Failed to create event via gRPC",
 			"name", createEventReq.Name,
@@ -200,7 +201,7 @@ func (h *eventHandler) handleUpdateEvent(w http.ResponseWriter, r *http.Request)
 
 	h.logger.InfoContext(grpcCtx, "Sending UpdateEvent request to gRPC service", "id", id)
 
-	updatedEvent, err := h.client.UpdateEvent(grpcCtx, protoReq)
+	updatedEvent, err := h.eventClient.UpdateEvent(grpcCtx, protoReq)
 	if err != nil {
 		h.logger.ErrorContext(grpcCtx, "Failed to update event via gRPC", "id", id, "error", err)
 		return err
@@ -231,7 +232,7 @@ func (h *eventHandler) handleDeleteEvent(w http.ResponseWriter, r *http.Request)
 
 	h.logger.InfoContext(grpcCtx, "Sending DeleteEvent request to gRPC service", "id", id)
 
-	_, err = h.client.DeleteEvent(grpcCtx, deleteReq)
+	_, err = h.eventClient.DeleteEvent(grpcCtx, deleteReq)
 	if err != nil {
 		h.logger.ErrorContext(grpcCtx, "Failed to delete event via gRPC", "id", id, "error", err)
 		return err

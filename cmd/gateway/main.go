@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/go-chi/chi/v5"
 	pbAuth "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/auth"
 	pbEvent "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/event"
 
@@ -20,8 +23,10 @@ import (
 
 func main() {
 	var (
-		grpc_EventSvc_addr = envflag.String("GRPC_EVENTSERVICE_ADDR", "0.0.0.0:9091", "!")
+		grpc_eventSvc_addr = envflag.String("GRPC_EVENTSERVICE_ADDR", "0.0.0.0:9091", "Event service gRPC address")
+		grpc_authSvc_addr  = envflag.String("GRPC_AUTHSERVICE_ADDR", "0.0.0.0:9092", "Auth service gRPC address")
 		httpPort           = envflag.String("HTTP_PORT", ":8080", "HTTP server port")
+		secretKey          = envflag.String("SECRET_KEY", "36080001349340267925113477454910", "For JWT encoding")
 	)
 	envflag.Parse()
 
@@ -32,8 +37,12 @@ func main() {
 	})
 
 	logger := slog.New(slogHandler)
+
 	logger.Info("Starting gateway service", "version", "1.0.0")
-	logger.Info("Configuration", "grpc_event_addr", *grpc_EventSvc_addr, "http_port", *httpPort)
+	logger.Info("Configuration",
+		"grpc_event_addr", *grpc_eventSvc_addr,
+		"grpc_auth_addr", *grpc_authSvc_addr,
+		"http_port", *httpPort)
 
 	// Базовый контекст микросервиса
 	ctx, cancel := context.WithCancel(context.Background())
@@ -43,27 +52,50 @@ func main() {
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 
-	logger.Info("Connecting to gRPC event service", "address", *grpc_EventSvc_addr)
+	logger.Info("Connecting to gRPC event service", "address", *grpc_eventSvc_addr)
 
 	// Соединяемся с ивент-сервисом
-	conn, err := grpc.NewClient(*grpc_EventSvc_addr, opts...)
+	authMcsConn, err := grpc.NewClient(*grpc_authSvc_addr, opts...)
+	if err != nil {
+		logger.Error("Failed to connect to auth service", "error", err)
+		os.Exit(1)
+	}
+	defer authMcsConn.Close()
+	logger.Info("Connected to gRPC auth service")
+
+	// Соединяемся с ивент-сервисом
+	eventMcsConn, err := grpc.NewClient(*grpc_eventSvc_addr, opts...)
 	if err != nil {
 		logger.Error("Failed to connect to event service", "error", err)
 		os.Exit(1)
 	}
-	defer conn.Close()
+	defer eventMcsConn.Close()
 	logger.Info("Connected to gRPC event service")
 
-	// Создание gRPC клиента
-	eventClient := pbEvent.NewEventServiceClient(conn)
-	authClient := pbAuth.NewAuthServiceClient(conn)
+	// Создание gRPC клиентов
+	eventClient := pbEvent.NewEventServiceClient(eventMcsConn)
+	authClient := pbAuth.NewAuthServiceClient(authMcsConn)
 
-	// Создание обработчика событий
-	eHandler := eventHandler.NewEventHandler(eventClient, ctx, logger)
-	aHandler := authhandler.NewAuthHandler(authClient, ctx, logger)
+	// Создание обработчиков событий
+	eHandler := eventHandler.NewEventHandler(eventClient, *secretKey, logger)
+	aHandler := authhandler.NewAuthHandler(authClient, // ЮЗЕР КЛИЕНТ *secretKey, logger)
 
 	// Регистрация маршрутов
 	eventRoutes := eventHandler.RegisterRoutes(eHandler)
+	authRoutes := authhandler.RegisterRoutes(aHandler)
+
+	// Создаем корневой роутер для объединения маршрутов
+	rootRouter := chi.NewRouter()
+
+	// Монтируем роутеры на корневой роутер
+	rootRouter.Mount("/", eventRoutes)
+	rootRouter.Mount("/", authRoutes)
+
+	// Создаем HTTP сервер
+	server := &http.Server{
+		Addr:    *httpPort,
+		Handler: rootRouter,
+	}
 
 	// Перехват сигналов для graceful shutdown
 	sigCh := make(chan os.Signal, 1)
@@ -72,7 +104,7 @@ func main() {
 	// Запуск HTTP сервера в отдельной горутине
 	go func() {
 		logger.Info("Starting HTTP server", "port", *httpPort)
-		if err := eventHandler.Start(*httpPort, eventRoutes); err != nil {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("HTTP server failed", "error", err)
 			cancel()
 		}
@@ -81,5 +113,15 @@ func main() {
 	// Ожидание сигнала завершения
 	sig := <-sigCh
 	logger.Info("Received signal, shutting down", "signal", sig)
+	cancel()
+
+	// Грэйсфул шатдаун
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		logger.Error("HTTP server shutdown failed", "error", err)
+	}
+
 	cancel()
 }
