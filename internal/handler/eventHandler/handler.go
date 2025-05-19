@@ -3,11 +3,11 @@ package eventHandler
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 
 	pbEvent "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/event"
+	"github.com/rx3lixir/gateway-service/pkg/logger"
 	"github.com/rx3lixir/gateway-service/pkg/token"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -16,10 +16,10 @@ import (
 type eventHandler struct {
 	eventClient pbEvent.EventServiceClient
 	tokenMaker  *token.JWTMaker
-	logger      *slog.Logger
+	logger      logger.Logger
 }
 
-func NewEventHandler(eventClient pbEvent.EventServiceClient, secretKey string, log *slog.Logger) *eventHandler {
+func NewEventHandler(eventClient pbEvent.EventServiceClient, secretKey string, log logger.Logger) *eventHandler {
 	return &eventHandler{
 		eventClient: eventClient,
 		tokenMaker:  token.NewJWTMaker(secretKey),

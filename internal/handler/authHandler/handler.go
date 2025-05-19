@@ -3,7 +3,6 @@ package authhandler
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +10,8 @@ import (
 	pbAuth "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/auth"
 	pbUser "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/user"
 
+	contextkeys "github.com/rx3lixir/gateway-service/pkg/contextKeys"
+	"github.com/rx3lixir/gateway-service/pkg/logger"
 	"github.com/rx3lixir/gateway-service/pkg/password"
 	"github.com/rx3lixir/gateway-service/pkg/token"
 	"google.golang.org/grpc/codes"
@@ -21,10 +22,10 @@ type authHandler struct {
 	authClient pbAuth.AuthServiceClient
 	userClient pbUser.UserServiceClient
 	tokenMaker *token.JWTMaker
-	logger     *slog.Logger
+	logger     logger.Logger
 }
 
-func NewAuthHandler(authClient pbAuth.AuthServiceClient, userClient pbUser.UserServiceClient, secretKey string, log *slog.Logger) *authHandler {
+func NewAuthHandler(authClient pbAuth.AuthServiceClient, userClient pbUser.UserServiceClient, secretKey string, log logger.Logger) *authHandler {
 	return &authHandler{
 		authClient: authClient,
 		userClient: userClient,
@@ -127,7 +128,7 @@ func (h *authHandler) handleLogout(w http.ResponseWriter, r *http.Request) error
 	h.logger.InfoContext(r.Context(), "Handling logout request")
 
 	// Получаем данные пользователя из контекста
-	claims, ok := r.Context().Value(authContextKey{}).(*token.UserClaims)
+	claims, ok := r.Context().Value(contextkeys.AuthKey).(*token.UserClaims)
 	if !ok || claims == nil {
 		h.logger.WarnContext(r.Context(), "No auth claims found in context")
 		return fmt.Errorf("unauthorized")
@@ -223,7 +224,7 @@ func (h *authHandler) handleRevokeToken(w http.ResponseWriter, r *http.Request) 
 	h.logger.InfoContext(r.Context(), "Handling token revocation request")
 
 	// Получаем данные пользователя из контекста, установленного middleware
-	claims, ok := r.Context().Value(authContextKey{}).(*token.UserClaims)
+	claims, ok := r.Context().Value(contextkeys.AuthKey).(*token.UserClaims)
 	if !ok || claims == nil {
 		h.logger.WarnContext(r.Context(), "No auth claims found in context")
 		return fmt.Errorf("unauthorized")

@@ -8,11 +8,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	contextkeys "github.com/rx3lixir/gateway-service/pkg/contextKeys"
 	"github.com/rx3lixir/gateway-service/pkg/token"
 )
-
-// Структура для передачи в контекст
-type authContextKey struct{}
 
 func RegisterRoutes(e *eventHandler) *chi.Mux {
 	r := chi.NewRouter()
@@ -28,6 +26,7 @@ func RegisterRoutes(e *eventHandler) *chi.Mux {
 		r.Get("/events/{id}", e.makeHTTPHandlerFunc(e.handleGetEventByID))
 
 		r.Group(func(r chi.Router) {
+			r.Use(e.authMiddleware)
 			r.Use(e.adminMiddleware)
 			r.Delete("/events/{id}", e.makeHTTPHandlerFunc(e.handleDeleteEvent))
 			r.Put("/events/{id}", e.makeHTTPHandlerFunc(e.handleUpdateEvent))
@@ -66,7 +65,7 @@ func (h *eventHandler) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		// Добавляем данные пользователя в контекст запроса
-		ctx := context.WithValue(r.Context(), authContextKey{}, claims)
+		ctx := context.WithValue(r.Context(), contextkeys.AuthKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -75,7 +74,7 @@ func (h *eventHandler) authMiddleware(next http.Handler) http.Handler {
 func (h *eventHandler) adminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Получаем данные пользователя из контекста
-		claims, ok := r.Context().Value(authContextKey{}).(*token.UserClaims)
+		claims, ok := r.Context().Value(contextkeys.AuthKey).(*token.UserClaims)
 		if !ok || claims == nil {
 			h.logger.WarnContext(r.Context(), "No auth claims found in context")
 			WriteJSON(w, http.StatusUnauthorized, APIError{Error: "Unauthorized"})

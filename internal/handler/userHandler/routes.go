@@ -8,12 +8,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	contextkeys "github.com/rx3lixir/gateway-service/pkg/contextKeys"
 	"github.com/rx3lixir/gateway-service/pkg/token"
 )
-
-// Структура для передачи в контекст
-type authContextKey struct{}
 
 func RegisterRoutes(u *userHandler) *chi.Mux {
 	r := chi.NewRouter()
@@ -22,6 +20,14 @@ func RegisterRoutes(u *userHandler) *chi.Mux {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
+
+	// Добавляем CORS middleware
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:3000"}, // <- Разрешаем фронту доступ
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		AllowCredentials: true, // Ecли будут куки или токены
+	}))
 
 	// API routes
 	r.Route("/api/v1/users", func(r chi.Router) {
@@ -37,6 +43,7 @@ func RegisterRoutes(u *userHandler) *chi.Mux {
 
 		// Защищенные эндпоинты (нужны права админа)
 		r.Group(func(r chi.Router) {
+			r.Use(u.authMiddleware)
 			r.Use(u.adminMiddleware)
 			r.Get("/", u.makeHTTPHandlerFunc(u.listUsers))
 			r.Delete("/{id}", u.makeHTTPHandlerFunc(u.deleteUser))
@@ -83,7 +90,7 @@ func (h *userHandler) authMiddleware(next http.Handler) http.Handler {
 func (h *userHandler) adminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Получаем данные пользователя из контекста
-		claims, ok := r.Context().Value(authContextKey{}).(*token.UserClaims)
+		claims, ok := r.Context().Value(contextkeys.AuthKey).(*token.UserClaims)
 		if !ok || claims == nil {
 			h.logger.WarnContext(r.Context(), "No auth claims found in context")
 			WriteJSON(w, http.StatusUnauthorized, APIError{Error: "Unauthorized"})

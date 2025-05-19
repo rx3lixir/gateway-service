@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	pbUser "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/user"
 
 	contextkeys "github.com/rx3lixir/gateway-service/pkg/contextKeys"
+	"github.com/rx3lixir/gateway-service/pkg/logger"
 	"github.com/rx3lixir/gateway-service/pkg/password"
 	"github.com/rx3lixir/gateway-service/pkg/token"
 )
@@ -20,10 +20,10 @@ type userHandler struct {
 	userClient pbUser.UserServiceClient
 	authClient pbAuth.AuthServiceClient
 	tokenMaker *token.JWTMaker
-	logger     *slog.Logger
+	logger     logger.Logger
 }
 
-func NewUserHandler(userClient pbUser.UserServiceClient, authClient pbAuth.AuthServiceClient, secretKey string, log *slog.Logger) *userHandler {
+func NewUserHandler(userClient pbUser.UserServiceClient, authClient pbAuth.AuthServiceClient, secretKey string, log logger.Logger) *userHandler {
 	return &userHandler{
 		userClient: userClient,
 		authClient: authClient,
@@ -96,6 +96,21 @@ func (h *userHandler) getUser(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
+	// Проверяем, что пользователь запрашивает информацию о себе или является администратором
+	claims, ok := r.Context().Value(contextkeys.AuthKey).(*token.UserClaims)
+	if !ok || claims == nil {
+		h.logger.WarnContext(r.Context(), "No auth claims found in context")
+		return fmt.Errorf("unauthorized")
+	}
+
+	// Только админ может просматривать информацию о других пользователях
+	if int64(claims.Id) != userId && !claims.IsAdmin {
+		h.logger.WarnContext(r.Context(), "User attempted to access unauthorized resource",
+			"requesting_user", claims.Email,
+			"requested_id", userId)
+		return fmt.Errorf("access denied")
+	}
+
 	// Создаем gRPC контекст для запроса
 	grpcCtx, cancel := h.createContext(r)
 	defer cancel()
@@ -124,6 +139,21 @@ func (h *userHandler) updateUser(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		h.logger.WarnContext(r.Context(), "Invalid user ID", "error", err)
 		return err
+	}
+
+	// Проверяем, что пользователь обновляет свою информацию или является администратором
+	claims, ok := r.Context().Value(contextkeys.AuthKey).(*token.UserClaims)
+	if !ok || claims == nil {
+		h.logger.WarnContext(r.Context(), "No auth claims found in context")
+		return fmt.Errorf("unauthorized")
+	}
+
+	// Только админ может обновлять информацию о других пользователях
+	if int64(claims.Id) != userId && !claims.IsAdmin {
+		h.logger.WarnContext(r.Context(), "User attempted to update unauthorized resource",
+			"requesting_user", claims.Email,
+			"requested_id", userId)
+		return fmt.Errorf("access denied")
 	}
 
 	// Декодируем запрос на обновление
@@ -165,15 +195,15 @@ func (h *userHandler) listUsers(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("unauthorized")
 	}
 
-	// Создаем gRPC контекст НА ОСНОВЕ HTTP контекста
-	grpcCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-
 	// Проверка на администратора
 	if !claims.IsAdmin {
 		h.logger.WarnContext(r.Context(), "Non-admin user tried to list all users", "user_email", claims.Email)
 		return fmt.Errorf("permission denied")
 	}
+
+	// Создаем gRPC контекст НА ОСНОВЕ HTTP контекста
+	grpcCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
 
 	// Запрашиваем у сервиса список пользователей
 	users, err := h.userClient.ListUsers(grpcCtx, &pbUser.UserReq{})
@@ -201,6 +231,21 @@ func (h *userHandler) deleteUser(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		h.logger.WarnContext(r.Context(), "Invalid user ID", "error", err)
 		return err
+	}
+
+	// Проверяем, что пользователь удаляет свою учетную запись или является администратором
+	claims, ok := r.Context().Value(contextkeys.AuthKey).(*token.UserClaims)
+	if !ok || claims == nil {
+		h.logger.WarnContext(r.Context(), "No auth claims found in context")
+		return fmt.Errorf("unauthorized")
+	}
+
+	// Только админ может удалять других пользователей
+	if int64(claims.Id) != userId && !claims.IsAdmin {
+		h.logger.WarnContext(r.Context(), "User attempted to delete unauthorized resource",
+			"requesting_user", claims.Email,
+			"requested_id", userId)
+		return fmt.Errorf("access denied")
 	}
 
 	// Cоздаем gRPC контекст для запроса

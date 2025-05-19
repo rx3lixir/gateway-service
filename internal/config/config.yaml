@@ -1,0 +1,9 @@
+service_params:
+  env: dev
+  secret_key: 36080001349340267925113477454910
+server_params:
+  http_port: :8080
+clients_params:
+  event_client_address: 0.0.0.0:9091
+  auth_client_address: 0.0.0.0:9092
+  user_client_address: 0.0.0.0.:9093
