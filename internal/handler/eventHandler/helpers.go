@@ -102,6 +102,23 @@ func (h *eventHandler) makeHTTPHandlerFunc(f apiFunc) http.HandlerFunc {
 	}
 }
 
+// clearCookies очищает все аутентификационные cookies
+func (h *eventHandler) clearCookies(w http.ResponseWriter) {
+	cookies := []string{"access_token", "refresh_token", "session_id"}
+	for _, name := range cookies {
+		cookie := &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			Expires:  time.Now().Add(-time.Hour),
+			HttpOnly: true,
+			Secure:   false,
+			SameSite: http.SameSiteLaxMode,
+		}
+		http.SetCookie(w, cookie)
+	}
+}
+
 // parseIDFromURL извлекает и валидирует ID из URL. Изменен на int64.
 func parseIDFromURL(r *http.Request, paramName string) (int64, error) {
 	idParam := chi.URLParam(r, paramName)

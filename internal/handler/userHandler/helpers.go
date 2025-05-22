@@ -52,6 +52,23 @@ func WriteJSON(w http.ResponseWriter, statusCode int, data interface{}) error {
 // которые возвращают ошибку для централизованной обработки.
 type apiFunc func(w http.ResponseWriter, r *http.Request) error
 
+// clearCookies очищает все аутентификационные cookies
+func (h *userHandler) clearCookies(w http.ResponseWriter) {
+	cookies := []string{"access_token", "refresh_token", "session_id"}
+	for _, name := range cookies {
+		cookie := &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			Expires:  time.Now().Add(-time.Hour),
+			HttpOnly: true,
+			Secure:   false,
+			SameSite: http.SameSiteLaxMode,
+		}
+		http.SetCookie(w, cookie)
+	}
+}
+
 // makeHTTPHandleFunc преобразует apiFunc в стандартный http.HandlerFunc,
 // добавляя унифицированную обработку ошибок.
 func (h *userHandler) makeHTTPHandlerFunc(f apiFunc) http.HandlerFunc {

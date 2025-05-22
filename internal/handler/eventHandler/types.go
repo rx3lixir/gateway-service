@@ -42,3 +42,30 @@ type UpdateEventReq struct {
 	Image       string  `json:"image"`
 	Source      string  `json:"source"`
 }
+
+// Category представляет категорию событий
+type Category struct {
+	Id        int       `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CreateCategoryReq представляет запрос на создание новой категории
+type CreateCategoryReq struct {
+	Name string `json:"name"`
+}
+
+// UpdateCategoryReq представляет запрос на обновление категории
+type UpdateCategoryReq struct {
+	Name string `json:"name"`
+}
+
+// NewCategory создает новую категорию из запроса
+func NewCategory(req *CreateCategoryReq) *Category {
+	return &Category{
+		Name:      req.Name,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+}

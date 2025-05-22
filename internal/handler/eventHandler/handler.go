@@ -246,3 +246,199 @@ func (h *eventHandler) handleDeleteEvent(w http.ResponseWriter, r *http.Request)
 		"message": fmt.Sprintf("event %d successfully deleted", id),
 	})
 }
+
+// handleListCategories возвращает информацию обо всех категориях
+func (h *eventHandler) handleListCategories(w http.ResponseWriter, r *http.Request) error {
+	h.logger.InfoContext(r.Context(), "Handling request to list categories")
+
+	// Создаем gRPC контекст
+	grpcCtx, cancel := h.createContext(r)
+	defer cancel()
+
+	// Создаем запрос
+	req := &pbEvent.ListCategoriesReq{}
+
+	h.logger.InfoContext(grpcCtx, "Sending ListCategories request to gRPC service")
+	res, err := h.eventClient.ListCategories(grpcCtx, req)
+	if err != nil {
+		h.logger.ErrorContext(grpcCtx, "Failed to list categories via gRPC", "error", err)
+		return err
+	}
+
+	categoriesCount := 0
+	if res != nil && res.Categories != nil {
+		categoriesCount = len(res.Categories)
+	}
+	h.logger.InfoContext(grpcCtx, "Received categories from gRPC service", "count", categoriesCount)
+
+	// Если результат получен, но в нем пусто
+	if res != nil && (res.Categories == nil || len(res.Categories) == 0) {
+		h.logger.InfoContext(grpcCtx, "No categories found")
+		return WriteJSON(w, http.StatusOK, []*Category{})
+	}
+
+	httpCategories := ProtoCategoriesListToHTTPCategoriesList(res.GetCategories())
+
+	h.logger.InfoContext(grpcCtx, "Converted to HTTP categories", "count", len(httpCategories))
+
+	return WriteJSON(w, http.StatusOK, httpCategories)
+}
+
+// handleGetCategoryByID возвращает категорию с переданным id
+func (h *eventHandler) handleGetCategoryByID(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseIDFromURL(r, "id")
+	if err != nil {
+		h.logger.WarnContext(r.Context(), "Failed to parse ID from URL", "error", err)
+		return err
+	}
+
+	h.logger.InfoContext(r.Context(), "Handling request to get category by ID", "id", id)
+
+	grpcCtx, cancel := h.createContext(r)
+	defer cancel()
+
+	getCategoryReq := IDToProtoGetCategoryByIDReq(int32(id))
+
+	h.logger.InfoContext(grpcCtx, "Sending GetCategory request to gRPC service", "id", id)
+
+	protoCategory, err := h.eventClient.GetCategory(grpcCtx, getCategoryReq)
+	if err != nil {
+		h.logger.ErrorContext(grpcCtx, "Failed to get category by ID via gRPC", "id", id, "error", err)
+		return err
+	}
+
+	if protoCategory == nil {
+		h.logger.WarnContext(grpcCtx, "Received nil category from gRPC service", "id", id)
+		return status.Error(codes.NotFound, fmt.Sprintf("category with id %d not found", id))
+	}
+
+	h.logger.InfoContext(grpcCtx, "Received category from gRPC service",
+		"id", protoCategory.GetId(),
+		"name", protoCategory.GetName())
+
+	httpCategory := ProtoCategoryResToHTTPCategory(protoCategory)
+
+	if httpCategory == nil {
+		h.logger.ErrorContext(grpcCtx, "Failed to convert Proto category to HTTP category", "id", id)
+		return status.Error(codes.Internal, "error converting category data")
+	}
+	return WriteJSON(w, http.StatusOK, httpCategory)
+}
+
+// handleCreateCategory создает категорию
+func (h *eventHandler) handleCreateCategory(w http.ResponseWriter, r *http.Request) error {
+	var createCategoryReq CreateCategoryReq
+
+	// Декодинг полученной категории
+	if err := json.NewDecoder(r.Body).Decode(&createCategoryReq); err != nil {
+		h.logger.WarnContext(r.Context(), "Failed to decode create category request", "error", err)
+		return fmt.Errorf("invalid request body: %w", err)
+	}
+	defer r.Body.Close()
+
+	// Подробное логирование полученных данных
+	h.logger.InfoContext(r.Context(), "Received category creation data",
+		"name", createCategoryReq.Name)
+
+	// Базовая валидация
+	if strings.TrimSpace(createCategoryReq.Name) == "" {
+		h.logger.WarnContext(r.Context(), "Category validation failed", "reason", "empty name")
+		return fmt.Errorf("category name is required")
+	}
+
+	grpcCtx, cancel := h.createContext(r)
+	defer cancel()
+
+	protoReq := HTTPCreateCategoryReqToProtoCreateCategoryReq(&createCategoryReq)
+
+	h.logger.InfoContext(grpcCtx, "Sending CreateCategory request to gRPC service")
+
+	createdCategory, err := h.eventClient.CreateCategory(grpcCtx, protoReq)
+	if err != nil {
+		h.logger.ErrorContext(grpcCtx, "Failed to create category via gRPC",
+			"name", createCategoryReq.Name,
+			"error", err)
+		return err
+	}
+
+	h.logger.InfoContext(grpcCtx, "Category created successfully",
+		"id", createdCategory.GetId(),
+		"name", createdCategory.GetName())
+
+	httpCategory := ProtoCategoryResToHTTPCategory(createdCategory)
+
+	return WriteJSON(w, http.StatusCreated, httpCategory)
+}
+
+// handleUpdateCategory обновляет переданную категорию
+func (h *eventHandler) handleUpdateCategory(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseIDFromURL(r, "id")
+	if err != nil {
+		h.logger.WarnContext(r.Context(), "Failed to parse ID from URL", "error", err)
+		return err
+	}
+
+	h.logger.InfoContext(r.Context(), "Handling request to update category", "id", id)
+
+	var updateCategoryReq UpdateCategoryReq
+
+	if err := json.NewDecoder(r.Body).Decode(&updateCategoryReq); err != nil {
+		h.logger.WarnContext(r.Context(), "Failed to decode update category request", "error", err)
+		return fmt.Errorf("Invalid request body: %w", err)
+	}
+	defer r.Body.Close()
+
+	h.logger.InfoContext(r.Context(), "Received category update data",
+		"id", id,
+		"name", updateCategoryReq.Name)
+
+	grpcCtx, cancel := h.createContext(r)
+	defer cancel()
+
+	protoReq := HTTPUpdateCategoryReqToProtoUpdateCategoryReq(int32(id), &updateCategoryReq)
+
+	h.logger.InfoContext(grpcCtx, "Sending UpdateCategory request to gRPC service", "id", id)
+
+	updatedCategory, err := h.eventClient.UpdateCategory(grpcCtx, protoReq)
+	if err != nil {
+		h.logger.ErrorContext(grpcCtx, "Failed to update category via gRPC", "id", id, "error", err)
+		return err
+	}
+
+	h.logger.InfoContext(grpcCtx, "Category updated successfully",
+		"id", updatedCategory.GetId(),
+		"name", updatedCategory.GetName())
+
+	httpCategory := ProtoCategoryResToHTTPCategory(updatedCategory)
+	return WriteJSON(w, http.StatusOK, httpCategory)
+}
+
+// handleDeleteCategory удаляет указанную категорию
+func (h *eventHandler) handleDeleteCategory(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseIDFromURL(r, "id")
+	if err != nil {
+		h.logger.WarnContext(r.Context(), "Failed to parse ID from URL", "error", err)
+		return err
+	}
+
+	h.logger.InfoContext(r.Context(), "Handling request to delete category", "id", id)
+
+	grpcCtx, cancel := h.createContext(r)
+	defer cancel()
+
+	deleteReq := IDToProtoDeleteCategoryReq(int32(id))
+
+	h.logger.InfoContext(grpcCtx, "Sending DeleteCategory request to gRPC service", "id", id)
+
+	_, err = h.eventClient.DeleteCategory(grpcCtx, deleteReq)
+	if err != nil {
+		h.logger.ErrorContext(grpcCtx, "Failed to delete category via gRPC", "id", id, "error", err)
+		return err
+	}
+
+	h.logger.InfoContext(grpcCtx, "Category deleted successfully", "id", id)
+
+	return WriteJSON(w, http.StatusOK, map[string]string{
+		"message": fmt.Sprintf("category %d successfully deleted", id),
+	})
+}

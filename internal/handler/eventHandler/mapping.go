@@ -132,3 +132,84 @@ func DateToProtoEventsListReq(date string) *pbEvent.ListEventsReq {
 		Date: &date,
 	}
 }
+
+// HTTPCreateCategoryReqToProtoCreateCategoryReq конвертирует
+// CreateCategoryReq (шлюз) в pbEvent.CreateCategoryReq (gRPC).
+func HTTPCreateCategoryReqToProtoCreateCategoryReq(req *CreateCategoryReq) *pbEvent.CreateCategoryReq {
+	if req == nil {
+		return nil
+	}
+
+	return &pbEvent.CreateCategoryReq{
+		Name: req.Name,
+	}
+}
+
+// HTTPUpdateCategoryReqToProtoUpdateCategoryReq конвертирует UpdateCategoryReq (шлюз)
+// и ID в pbEvent.UpdateCategoryReq (gRPC).
+func HTTPUpdateCategoryReqToProtoUpdateCategoryReq(id int32, req *UpdateCategoryReq) *pbEvent.UpdateCategoryReq {
+	if req == nil {
+		return &pbEvent.UpdateCategoryReq{Id: id}
+	}
+
+	return &pbEvent.UpdateCategoryReq{
+		Id:   id,
+		Name: req.Name,
+	}
+}
+
+// ProtoCategoryResToHTTPCategory конвертирует pbEvent.CategoryRes (gRPC)
+// в Category (шлюз).
+func ProtoCategoryResToHTTPCategory(protoCategory *pbEvent.CategoryRes) *Category {
+	if protoCategory == nil {
+		return nil
+	}
+
+	var createdAt time.Time
+	if protoCategory.GetCreatedAt() != nil && protoCategory.GetCreatedAt().IsValid() {
+		createdAt = protoCategory.GetCreatedAt().AsTime()
+	} else {
+		// Если createdAt не установлен, используем текущее время
+		createdAt = time.Now()
+	}
+
+	var updatedAt time.Time
+	if protoCategory.GetUpdatedAt() != nil && protoCategory.GetUpdatedAt().IsValid() {
+		updatedAt = protoCategory.GetUpdatedAt().AsTime()
+	} else {
+		// Если updatedAt не установлен, используем то же время что и createdAt
+		updatedAt = createdAt
+	}
+
+	return &Category{
+		Id:        int(protoCategory.GetId()),
+		Name:      protoCategory.GetName(),
+		CreatedAt: createdAt,
+		UpdatedAt: updatedAt,
+	}
+}
+
+// ProtoCategoriesListToHTTPCategoriesList конвертирует []*pbEvent.CategoryRes (gRPC)
+// в []*Category (шлюз).
+func ProtoCategoriesListToHTTPCategoriesList(protoCategories []*pbEvent.CategoryRes) []*Category {
+	if protoCategories == nil {
+		return []*Category{} // Возвращаем пустой слайс, а не nil, для консистентности JSON
+	}
+	httpCategories := make([]*Category, 0, len(protoCategories))
+	for _, protoCategory := range protoCategories {
+		if httpCategory := ProtoCategoryResToHTTPCategory(protoCategory); httpCategory != nil {
+			httpCategories = append(httpCategories, httpCategory)
+		}
+	}
+	return httpCategories
+}
+
+// IDToProtoGetCategoryByIDReq создает pbEvent.GetCategoryReq.
+func IDToProtoGetCategoryByIDReq(id int32) *pbEvent.GetCategoryReq {
+	return &pbEvent.GetCategoryReq{Id: id}
+}
+
+// IDToProtoDeleteCategoryReq создает pbEvent.DeleteCategoryReq.
+func IDToProtoDeleteCategoryReq(id int32) *pbEvent.DeleteCategoryReq {
+	return &pbEvent.DeleteCategoryReq{Id: id}
+}
