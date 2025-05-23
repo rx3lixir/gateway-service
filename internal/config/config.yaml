@@ -6,4 +6,4 @@ server_params:
 clients_params:
   event_client_address: 0.0.0.0:9091
   auth_client_address: 0.0.0.0:9092
-  user_client_address: 0.0.0.0.:9093
+  user_client_address: 0.0.0.0:9093
