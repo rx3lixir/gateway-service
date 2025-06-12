@@ -1,0 +1,34 @@
+# Git файлы
+.git
+.gitignore
+
+# Бинарники и временные файлы
+bin/
+*.exe
+*.test
+*.out
+
+# IDE файлы
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Документация
+README.md
+docs/
+
+# Тесты
+*_test.go
+
+# Переменные окружения
+.env
+.env.*
+
+# Makefile (не нужен в контейнере)
+Makefile
+
+# Dockerfile и docker-compose
+Dockerfile
+docker-compose.yml
+.dockerignore

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	pbAuth "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/auth"
 	pbEvent "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/event"
 	pbUser "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/user"
+	"github.com/rx3lixir/gateway-service/pkg/health"
 	"github.com/rx3lixir/gateway-service/pkg/logger"
 
 	"github.com/rx3lixir/gateway-service/internal/config"
@@ -25,7 +27,6 @@ import (
 )
 
 func main() {
-
 	c, err := config.New()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Ошибка загрузки конфигурации: %v\n", err)
@@ -40,15 +41,21 @@ func main() {
 	log := logger.NewLogger()
 
 	log.Info("Starting gateway service", "version", "1.0.0")
-	log.Info("Configuration",
-		"grpc_event_addr", c.Clients.EventClientAddress,
-		"grpc_auth_addr", c.Clients.AuthClientAddress,
-		"grpc_user_addr", c.Clients.UserClientAddress,
-		"http_port", c.Server.HTTPPort)
 
 	// Базовый контекст микросервиса
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Перехват сигналов для graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	log.Info("Configuration",
+		"grpc_event_addr", c.Clients.EventClientAddress,
+		"grpc_auth_addr", c.Clients.AuthClientAddress,
+		"grpc_user_addr", c.Clients.UserClientAddress,
+		"http_port", c.Server.HTTPPort,
+	)
 
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -104,18 +111,54 @@ func main() {
 	rootRouter.Mount("/auth", authRoutes)
 	rootRouter.Mount("/user", userRoutes)
 
+	// Настраиваем health checks
+	healthChecker := health.New("event-service", "1.0.0", health.WithTimeout(3*time.Second))
+
+	// Проверяем gRPC соединения
+	healthChecker.AddCheck("event-service-connection-check", health.GRPCChecker(eventMcsConn, "event-service"))
+	healthChecker.AddCheck("user-service-connection-check", health.GRPCChecker(userMcsConn, "user-service"))
+	healthChecker.AddCheck("auth-service-connection-check", health.GRPCChecker(authMcsConn, "auth-service"))
+
+	// Запускаем HTTP сервер для health checks
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("/health", healthChecker.Handler())
+	healthMux.HandleFunc("/ready", healthChecker.ReadyHandler())
+
+	// Добавляем liveness probe (просто отвечает 200 OK)
+	healthMux.HandleFunc("/live", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ALIVE"))
+	})
+
 	// Создаем HTTP сервер
 	server := &http.Server{
 		Addr:    c.Server.HTTPPort,
 		Handler: rootRouter,
 	}
 
-	// Перехват сигналов для graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	// HTTP Health сервер
+	healthServer := &http.Server{
+		Addr:    ":8070",
+		Handler: healthMux,
+	}
 
-	// Запуск HTTP сервера в отдельной горутине
+	// WaitGroup для координации shutdown
+	var wg sync.WaitGroup
+
+	// Запуск HTTP-health сервера в отдельной горутине
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		log.Info("Starting health check server", "address", healthServer.Addr)
+		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error("Health check server error", "error", err)
+		}
+	}()
+
+	// Запуск HTTP сервера gateway в отдельной горутине
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		log.Info("Starting HTTP server", "port", c.Server.HTTPPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("HTTP server failed", "error", err)
