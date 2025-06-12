@@ -9,19 +9,22 @@ import (
 	"time"
 
 	"github.com/rx3lixir/gateway-service/pkg/logger"
+	"google.golang.org/grpc"
 )
 
 // Server структура для healthcheck сервера
 type Server struct {
-	config Config
-	health *Health
-	server *http.Server
-	pool   *pgxpool.Pool
-	log    logger.Logger
+	config      Config
+	health      *Health
+	server      *http.Server
+	log         logger.Logger
+	authClient  *grpc.ClientConn
+	userClient  *grpc.ClientConn
+	eventClient *grpc.ClientConn
 }
 
 // NewServer создает новый healthcheck сервер
-func NewServer(pool *pgxpool.Pool, log logger.Logger, opts ...Option) *Server {
+func NewServer(auth *grpc.ClientConn, user *grpc.ClientConn, event *grpc.ClientConn, log logger.Logger, opts ...Option) *Server {
 	// Применяем дефолтную конфигурацию
 	config := defaultConfig()
 
@@ -40,7 +43,6 @@ func NewServer(pool *pgxpool.Pool, log logger.Logger, opts ...Option) *Server {
 	s := &Server{
 		config: config,
 		health: healthChecker,
-		pool:   pool,
 		log:    log,
 	}
 
@@ -52,27 +54,16 @@ func NewServer(pool *pgxpool.Pool, log logger.Logger, opts ...Option) *Server {
 
 // setupChecks настраивает все проверки здоровья для микросервиса
 func (s *Server) setupChecks() {
-	// Проверка базы данных
-	s.health.AddCheck("database", PostgresChecker(s.pool))
-
-	// Проверка миграций
-	s.health.AddCheck("migrations", MigrationChecker(s.pool, s.config.MigrationVersion))
-
-	// Проверка обязательных таблиц
-	if len(s.config.RequiredTables) > 0 {
-		s.health.AddCheck("required_tables", SimpleTableChecker(s.pool, s.config.RequiredTables))
-	}
+	// Проверка grpc соединений
+	s.health.AddCheck("gRPC_connections", GRPCChecker(s.authClient, "auth_client"))
+	s.health.AddCheck("gRPC_connections", GRPCChecker(s.userClient, "user_client"))
+	s.health.AddCheck("gRPC_connections", GRPCChecker(s.eventClient, "event_client"))
 
 	s.log.Info("Health checks configured",
 		"service", s.config.ServiceName,
 		"version", s.config.Version,
 		"port", s.config.Port,
 		"timeout", s.config.Timeout,
-		"database_check", true,
-		"migrations_check", true,
-		"tables_check", len(s.config.RequiredTables) > 0,
-		"required_tables", s.config.RequiredTables,
-		"migration_version", s.config.MigrationVersion,
 	)
 }
 

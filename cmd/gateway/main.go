@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
 	pbAuth "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/auth"
 	pbEvent "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/event"
 	pbUser "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/user"
@@ -42,13 +42,9 @@ func main() {
 
 	log.Info("Starting gateway service", "version", "1.0.0")
 
-	// Базовый контекст микросервиса
-	_, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	// Перехват сигналов для graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
 
 	log.Info("Configuration",
 		"grpc_event_addr", c.Clients.EventClientAddress,
@@ -111,85 +107,52 @@ func main() {
 	rootRouter.Mount("/auth", authRoutes)
 	rootRouter.Mount("/user", userRoutes)
 
-	// Настраиваем health checks
-	healthChecker := health.New("event-service", "1.0.0", health.WithTimeout(3*time.Second))
+	// Создаем HealthCheck сервер
+	healthServer := health.NewServer(
+		authMcsConn,
+		userMcsConn,
+		eventMcsConn,
+		log,
+		health.WithServiceName("gateway-service"),
+		health.WithVersion("1.0.0"),
+		health.WithPort(":8070"),
+		health.WithTimeout(5*time.Second),
+	)
 
-	// Проверяем gRPC соединения
-	healthChecker.AddCheck("event-service-connection-check", health.GRPCChecker(eventMcsConn, "event-service"))
-	healthChecker.AddCheck("user-service-connection-check", health.GRPCChecker(userMcsConn, "user-service"))
-	healthChecker.AddCheck("auth-service-connection-check", health.GRPCChecker(authMcsConn, "auth-service"))
-
-	// Запускаем HTTP сервер для health checks
-	healthMux := http.NewServeMux()
-	healthMux.HandleFunc("/health", healthChecker.Handler())
-	healthMux.HandleFunc("/ready", healthChecker.ReadyHandler())
-
-	// Добавляем liveness probe (просто отвечает 200 OK)
-	healthMux.HandleFunc("/live", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ALIVE"))
-	})
-
-	// Создаем HTTP сервер
+	// Создаем HTTP Gateway сервер
 	server := &http.Server{
 		Addr:    c.Server.HTTPPort,
 		Handler: rootRouter,
 	}
 
-	// HTTP Health сервер
-	healthServer := &http.Server{
-		Addr:    ":8070",
-		Handler: healthMux,
-	}
+	// Запускаем серверы
+	errCh := make(chan error, 2)
 
-	// WaitGroup для координации shutdown
-	var wg sync.WaitGroup
-
-	// Запуск HTTP-health сервера в отдельной горутине
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
-		log.Info("Starting health check server", "address", healthServer.Addr)
-		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("Health check server error", "error", err)
-			cancel()
-		}
+		errCh <- healthServer.Start()
 	}()
 
-	// Запуск HTTP сервера gateway в отдельной горутине
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
-		log.Info("Starting HTTP server", "port", c.Server.HTTPPort)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("HTTP server failed", "error", err)
-			cancel()
-		}
+		errCh <- server.ListenAndServe()
 	}()
-
-	// Ожидание сигнала завершения
-	sig := <-sigCh
-	log.Info("Received signal, shutting down", "signal", sig)
 
 	// Грэйсфул шатдаун
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	// Завершение работы основного HTTP сервера
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Error("HTTP server shutdown failed", "error", err)
+	select {
+	case <-signalCh:
+		log.Info("Shutting down gracefully...")
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Error("Gateway server shutdown internal error", "error", err)
+		}
+	case <-errCh:
+		log.Error("Server error", "error", err)
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Error("Gateway server shutdown internal error", "error", err)
+		}
 	}
 
-	// Завершение работы основного HTTP Health сервера
-	if err := healthServer.Shutdown(shutdownCtx); err != nil {
-		log.Error("HTTP Health server shutdown failed", "error", err)
-	}
-
-	// Ждем завершения всех горутин
-	wg.Wait()
-
-	cancel()
-
-	// Теперь можно безопасно выходить
 	log.Info("All servers stopped gracefully")
 }
