@@ -1,4 +1,3 @@
-// pkg/health/checkers.go
 package health
 
 import (

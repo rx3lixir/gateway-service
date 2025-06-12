@@ -152,6 +152,7 @@ func main() {
 		log.Info("Starting health check server", "address", healthServer.Addr)
 		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("Health check server error", "error", err)
+			cancel()
 		}
 	}()
 
@@ -169,15 +170,26 @@ func main() {
 	// Ожидание сигнала завершения
 	sig := <-sigCh
 	log.Info("Received signal, shutting down", "signal", sig)
-	cancel()
 
 	// Грэйсфул шатдаун
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
+	// Завершение работы основного HTTP сервера
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Error("HTTP server shutdown failed", "error", err)
 	}
 
+	// Завершение работы основного HTTP Health сервера
+	if err := healthServer.Shutdown(shutdownCtx); err != nil {
+		log.Error("HTTP Health server shutdown failed", "error", err)
+	}
+
+	// Ждем завершения всех горутин
+	wg.Wait()
+
 	cancel()
+
+	// Теперь можно безопасно выходить
+	log.Info("All servers stopped gracefully")
 }
