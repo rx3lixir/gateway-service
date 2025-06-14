@@ -19,70 +19,6 @@ type eventHandler struct {
 	logger      logger.Logger
 }
 
-func NewEventHandler(eventClient pbEvent.EventServiceClient, secretKey string, log logger.Logger) *eventHandler {
-	return &eventHandler{
-		eventClient: eventClient,
-		tokenMaker:  token.NewJWTMaker(secretKey),
-		logger:      log,
-	}
-}
-
-// handleGetEvents возвращает информацию обо всех событиях
-func (h *eventHandler) handleGetEvents(w http.ResponseWriter, r *http.Request) error {
-	h.logger.InfoContext(r.Context(), "Handling request to list events")
-
-	// Получаем параметры запроса
-	categoryIdParam := r.URL.Query().Get("category_id")
-	dateParam := r.URL.Query().Get("date")
-
-	var listEventsReq *pbEvent.ListEventsReq
-
-	// Создаем соответствующий gRPC запрос в зависимости от параметров
-	if categoryIdParam != "" {
-		categoryID, err := parseInt64(categoryIdParam)
-		if err != nil {
-			h.logger.WarnContext(r.Context(), "Invalid category_id parameter", "value", categoryIdParam, "error", err)
-			return fmt.Errorf("invalid category_id parameter: %w", err)
-		}
-		listEventsReq = CategoryIDToProtoEventsListReq(categoryID)
-	} else if dateParam != "" {
-		listEventsReq = DateToProtoEventsListReq(dateParam)
-		h.logger.InfoContext(r.Context(), "Filtering events by date", "date", dateParam)
-	} else {
-		listEventsReq = NoParamsToProtoEventsListReq()
-		h.logger.InfoContext(r.Context(), "Requesting all events (no filters)")
-	}
-
-	// Создаем gRPC контекст
-	grpcCtx, cancel := h.createContext(r)
-	defer cancel()
-
-	h.logger.InfoContext(grpcCtx, "Sending ListEvents request to gRPC service")
-	res, err := h.eventClient.ListEvents(grpcCtx, listEventsReq)
-	if err != nil {
-		h.logger.ErrorContext(grpcCtx, "Failed to list events via gRPC", "error", err)
-		return err
-	}
-
-	eventsCount := 0
-	if res != nil && res.Events != nil {
-		eventsCount = len(res.Events)
-	}
-	h.logger.InfoContext(grpcCtx, "Received events from gRPC service", "count", eventsCount)
-
-	// Если результат получен, но в нем пусто
-	if res != nil && (res.Events == nil || len(res.Events) == 0) {
-		h.logger.InfoContext(grpcCtx, "No events found")
-		return WriteJSON(w, http.StatusOK, []*Event{})
-	}
-
-	httpEvents := ProtoEventsListToHTTPEventsList(res.GetEvents())
-
-	h.logger.InfoContext(grpcCtx, "Converted  to HTTP events", "count", len(httpEvents))
-
-	return WriteJSON(w, http.StatusOK, httpEvents)
-}
-
 // handleGetEventByID возвращает событие с переданным id
 func (h *eventHandler) handleGetEventByID(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseIDFromURL(r, "id")
@@ -150,7 +86,6 @@ func (h *eventHandler) handleCreateEvent(w http.ResponseWriter, r *http.Request)
 	grpcCtx, cancel := h.createContext(r)
 	defer cancel()
 
-	// ебать это что за название надо переделать
 	protoReq := HTTPCreateReqToProtoCreateEventReq(&createEventReq)
 
 	h.logger.InfoContext(grpcCtx, "Sending CreateEvent request to gRPC service")
@@ -240,8 +175,6 @@ func (h *eventHandler) handleDeleteEvent(w http.ResponseWriter, r *http.Request)
 
 	h.logger.InfoContext(grpcCtx, "Event deleted successfully", "id", id)
 
-	// Можно вернуть 204 No Content или сообщение об успехе
-	// return WriteJSON(w, http.StatusNoContent, nil)
 	return WriteJSON(w, http.StatusOK, map[string]string{
 		"message": fmt.Sprintf("event %d successfully deleted", id),
 	})
@@ -441,4 +374,130 @@ func (h *eventHandler) handleDeleteCategory(w http.ResponseWriter, r *http.Reque
 	return WriteJSON(w, http.StatusOK, map[string]string{
 		"message": fmt.Sprintf("category %d successfully deleted", id),
 	})
+}
+
+func NewEventHandler(eventClient pbEvent.EventServiceClient, secretKey string, log logger.Logger) *eventHandler {
+	return &eventHandler{
+		eventClient: eventClient,
+		tokenMaker:  token.NewJWTMaker(secretKey),
+		logger:      log,
+	}
+}
+
+// handleGetEvents возвращает информацию обо всех событиях с поддержкой фильтрации
+func (h *eventHandler) handleGetEvents(w http.ResponseWriter, r *http.Request) error {
+	h.logger.InfoContext(r.Context(), "Handling request to list events with filters")
+
+	// Парсим параметры запроса в структуру фильтров
+	filterReq, err := ParseQueryParams(r.URL.Query())
+	if err != nil {
+		h.logger.WarnContext(r.Context(), "Failed to parse query parameters", "error", err)
+		return fmt.Errorf("invalid query parameters: %w", err)
+	}
+
+	// Логируем полученные фильтры
+	h.logger.InfoContext(r.Context(), "Parsed event filters",
+		"category_ids", filterReq.CategoryIDs,
+		"min_price", filterReq.MinPrice,
+		"max_price", filterReq.MaxPrice,
+		"date_from", filterReq.DateFrom,
+		"date_to", filterReq.DateTo,
+		"location", filterReq.Location,
+		"source", filterReq.Source,
+		"search_text", filterReq.SearchText,
+		"limit", filterReq.Limit,
+		"offset", filterReq.Offset,
+		"include_count", filterReq.IncludeCount,
+	)
+
+	// Создаем gRPC контекст
+	grpcCtx, cancel := h.createContext(r)
+	defer cancel()
+
+	// Конвертируем HTTP запрос в gRPC запрос
+	protoReq := HTTPListReqToProtoListReq(filterReq)
+
+	h.logger.InfoContext(grpcCtx, "Sending ListEvents request to gRPC service with filters")
+	res, err := h.eventClient.ListEvents(grpcCtx, protoReq)
+	if err != nil {
+		h.logger.ErrorContext(grpcCtx, "Failed to list events via gRPC", "error", err)
+		return err
+	}
+
+	eventsCount := 0
+	if res != nil && res.Events != nil {
+		eventsCount = len(res.Events)
+	}
+	h.logger.InfoContext(grpcCtx, "Received events from gRPC service", "count", eventsCount)
+
+	// Если результат получен, но в нем пусто
+	if res != nil && (res.Events == nil || len(res.Events) == 0) {
+		h.logger.InfoContext(grpcCtx, "No events found")
+		return WriteJSON(w, http.StatusOK, &ListEventsRes{
+			Events: []*Event{},
+		})
+	}
+
+	// Конвертируем Proto ответ в HTTP ответ
+	httpResponse := ProtoListResToHTTPListRes(res)
+
+	h.logger.InfoContext(grpcCtx, "Converted to HTTP events response",
+		"events_count", len(httpResponse.Events),
+		"has_pagination", httpResponse.Pagination != nil,
+	)
+
+	return WriteJSON(w, http.StatusOK, httpResponse)
+}
+
+// handleGetEventsAdvanced обрабатывает POST запрос с фильтрами в теле запроса
+func (h *eventHandler) handleGetEventsAdvanced(w http.ResponseWriter, r *http.Request) error {
+	h.logger.InfoContext(r.Context(), "Handling advanced events request with body filters")
+
+	var filterReq ListEventsReq
+
+	// Декодируем фильтры из тела запроса
+	if err := json.NewDecoder(r.Body).Decode(&filterReq); err != nil {
+		h.logger.WarnContext(r.Context(), "Failed to decode filter request", "error", err)
+		return fmt.Errorf("invalid request body: %w", err)
+	}
+	defer r.Body.Close()
+
+	// Логируем полученные фильтры
+	h.logger.InfoContext(r.Context(), "Parsed advanced event filters",
+		"category_ids", filterReq.CategoryIDs,
+		"min_price", filterReq.MinPrice,
+		"max_price", filterReq.MaxPrice,
+		"date_from", filterReq.DateFrom,
+		"date_to", filterReq.DateTo,
+		"location", filterReq.Location,
+		"source", filterReq.Source,
+		"search_text", filterReq.SearchText,
+		"limit", filterReq.Limit,
+		"offset", filterReq.Offset,
+		"include_count", filterReq.IncludeCount,
+	)
+
+	// Создаем gRPC контекст
+	grpcCtx, cancel := h.createContext(r)
+	defer cancel()
+
+	// Конвертируем HTTP запрос в gRPC запрос
+	protoReq := HTTPListReqToProtoListReq(&filterReq)
+
+	h.logger.InfoContext(grpcCtx, "Sending advanced ListEvents request to gRPC service")
+	res, err := h.eventClient.ListEvents(grpcCtx, protoReq)
+	if err != nil {
+		h.logger.ErrorContext(grpcCtx, "Failed to list events via gRPC", "error", err)
+		return err
+	}
+
+	// Конвертируем Proto ответ в HTTP ответ
+	httpResponse := ProtoListResToHTTPListRes(res)
+
+	h.logger.InfoContext(grpcCtx, "Advanced events request completed",
+		"events_count", len(httpResponse.Events),
+		"has_pagination", httpResponse.Pagination != nil,
+	)
+
+	return WriteJSON(w, http.StatusOK, httpResponse)
 }

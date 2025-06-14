@@ -128,29 +128,52 @@ func main() {
 	// Запускаем серверы
 	errCh := make(chan error, 2)
 
+	// Запускаем health сервер
 	go func() {
-		errCh <- healthServer.Start()
+		log.Info("Starting health check server on :8070")
+		if err := healthServer.Start(); err != nil {
+			errCh <- fmt.Errorf("health server error: %w", err)
+		}
 	}()
 
+	// Запускаем gateway сервер
 	go func() {
-		errCh <- server.ListenAndServe()
+		log.Info("Starting gateway server", "port", c.Server.HTTPPort)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- fmt.Errorf("gateway server error: %w", err)
+		}
 	}()
+
+	log.Info("All servers started successfully")
 
 	// Грэйсфул шатдаун
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
 	select {
-	case <-signalCh:
-		log.Info("Shutting down gracefully...")
+	case sig := <-signalCh:
+		log.Info("Received shutdown signal", "signal", sig)
 
+		// Останавливаем gateway сервер
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Error("Gateway server shutdown internal error", "error", err)
+			log.Error("Gateway server shutdown error", "error", err)
 		}
-	case <-errCh:
+
+		// Останавливаем health сервер
+		if err := healthServer.Shutdown(shutdownCtx); err != nil {
+			log.Error("Health server shutdown error", "error", err)
+		}
+
+	case err := <-errCh:
 		log.Error("Server error", "error", err)
+
+		// При ошибке останавливаем оба сервера
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Error("Gateway server shutdown internal error", "error", err)
+			log.Error("Gateway server shutdown error", "error", err)
+		}
+
+		if err := healthServer.Shutdown(shutdownCtx); err != nil {
+			log.Error("Health server shutdown error", "error", err)
 		}
 	}
 

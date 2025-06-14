@@ -22,27 +22,25 @@ func RegisterRoutes(e *eventHandler) *chi.Mux {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// События: без аутентификации
-
 		r.Get("/events", e.makeHTTPHandlerFunc(e.handleGetEvents))
 		r.Get("/events/{id}", e.makeHTTPHandlerFunc(e.handleGetEventByID))
+		r.Post("/events/search", e.makeHTTPHandlerFunc(e.handleGetEventsAdvanced))
 
 		// Категории: без аутентификации
-
 		r.Get("/categories", e.makeHTTPHandlerFunc(e.handleListCategories))
 		r.Get("/categories/{id}", e.makeHTTPHandlerFunc(e.handleGetCategoryByID))
 
+		// Защищенные эндпоинты
 		r.Group(func(r chi.Router) {
 			r.Use(e.authMiddleware)
 			r.Use(e.adminMiddleware)
 
 			// Админские операции для событий
-
 			r.Delete("/events/{id}", e.makeHTTPHandlerFunc(e.handleDeleteEvent))
 			r.Patch("/events/{id}", e.makeHTTPHandlerFunc(e.handleUpdateEvent))
 			r.Post("/events", e.makeHTTPHandlerFunc(e.handleCreateEvent))
 
 			// Админские операции для категорий
-
 			r.Post("/categories", e.makeHTTPHandlerFunc(e.handleCreateCategory))
 			r.Patch("/categories/{id}", e.makeHTTPHandlerFunc(e.handleUpdateCategory))
 			r.Delete("/categories/{id}", e.makeHTTPHandlerFunc(e.handleDeleteCategory))

@@ -1,3 +1,5 @@
+// pkg/health/server.go
+
 package health
 
 import (
@@ -18,7 +20,7 @@ type Server struct {
 	health      *Health
 	server      *http.Server
 	log         logger.Logger
-	authClient  *grpc.ClientConn
+	authClient  *grpc.ClientConn // ИСПРАВЛЕНО: сохраняем соединения
 	userClient  *grpc.ClientConn
 	eventClient *grpc.ClientConn
 }
@@ -41,9 +43,12 @@ func NewServer(auth *grpc.ClientConn, user *grpc.ClientConn, event *grpc.ClientC
 	)
 
 	s := &Server{
-		config: config,
-		health: healthChecker,
-		log:    log,
+		config:      config,
+		health:      healthChecker,
+		log:         log,
+		authClient:  auth, // ИСПРАВЛЕНО: сохраняем соединения
+		userClient:  user,
+		eventClient: event,
 	}
 
 	s.setupChecks()
@@ -54,10 +59,18 @@ func NewServer(auth *grpc.ClientConn, user *grpc.ClientConn, event *grpc.ClientC
 
 // setupChecks настраивает все проверки здоровья для микросервиса
 func (s *Server) setupChecks() {
-	// Проверка grpc соединений
-	s.health.AddCheck("gRPC_connections", GRPCChecker(s.authClient, "auth_client"))
-	s.health.AddCheck("gRPC_connections", GRPCChecker(s.userClient, "user_client"))
-	s.health.AddCheck("gRPC_connections", GRPCChecker(s.eventClient, "event_client"))
+	// ИСПРАВЛЕНО: теперь используем сохранённые соединения
+	if s.authClient != nil {
+		s.health.AddCheck("auth_service", GRPCChecker(s.authClient, "auth-service"))
+	}
+
+	if s.userClient != nil {
+		s.health.AddCheck("user_service", GRPCChecker(s.userClient, "user-service"))
+	}
+
+	if s.eventClient != nil {
+		s.health.AddCheck("event_service", GRPCChecker(s.eventClient, "event-service"))
+	}
 
 	s.log.Info("Health checks configured",
 		"service", s.config.ServiceName,
@@ -121,10 +134,6 @@ func (s *Server) infoHandler(w http.ResponseWriter, r *http.Request) {
 			"live":   "/live",
 			"info":   "/info",
 		},
-	}
-
-	if len(s.config.RequiredTables) > 0 {
-		info["required_tables"] = s.config.RequiredTables
 	}
 
 	json.NewEncoder(w).Encode(info)

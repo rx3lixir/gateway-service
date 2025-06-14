@@ -43,6 +43,40 @@ type UpdateEventReq struct {
 	Source      string  `json:"source"`
 }
 
+// ListEventsReq представляет запрос на получение списка событий с фильтрами
+type ListEventsReq struct {
+	// Фильтры
+	CategoryIDs []int64  `json:"category_ids,omitempty"`
+	MinPrice    *float32 `json:"min_price,omitempty"`
+	MaxPrice    *float32 `json:"max_price,omitempty"`
+	DateFrom    *string  `json:"date_from,omitempty"`
+	DateTo      *string  `json:"date_to,omitempty"`
+	Location    *string  `json:"location,omitempty"`
+	Source      *string  `json:"source,omitempty"`
+	SearchText  *string  `json:"search_text,omitempty"`
+
+	// Пагинация
+	Limit  *int32 `json:"limit,omitempty"`
+	Offset *int32 `json:"offset,omitempty"`
+
+	// Дополнительные опции
+	IncludeCount *bool `json:"include_count,omitempty"`
+}
+
+// ListEventsRes представляет ответ со списком событий
+type ListEventsRes struct {
+	Events     []*Event        `json:"events"`
+	Pagination *PaginationMeta `json:"pagination,omitempty"`
+}
+
+// PaginationMeta содержит мета-информацию для пагинации
+type PaginationMeta struct {
+	TotalCount int64 `json:"total_count"`
+	Limit      int32 `json:"limit"`
+	Offset     int32 `json:"offset"`
+	HasMore    bool  `json:"has_more"`
+}
+
 // Category представляет категорию событий
 type Category struct {
 	Id        int       `json:"id"`

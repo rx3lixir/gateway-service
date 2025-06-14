@@ -4,6 +4,6 @@ service_params:
 server_params:
   http_port: :8080
 clients_params:
-  event_client_address: 0.0.0.0:9091
-  auth_client_address: 0.0.0.0:9092
-  user_client_address: 0.0.0.0:9093
+  event_client_address: event-service:9091
+  auth_client_address: auth-service:9092
+  user_client_address: user-service:9093

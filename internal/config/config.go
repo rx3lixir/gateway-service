@@ -2,21 +2,19 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-
 	"github.com/go-playground/validator/v10"
 	"github.com/spf13/viper"
+	"os"
+	"path/filepath"
 )
 
-// Константы для ключей конфигурации
 const (
 	envKey               = "service_params.env"
-	secretKey            = "secret_key.env"
-	gateway_http_port    = "gateway_http_port.env"
-	user_client_address  = "user_client_addr.env"
-	auth_client_address  = "auth_client_addr.env"
-	event_client_address = "event_client_addr.env"
+	secretKey            = "service_params.secret_key"
+	gateway_http_port    = "server_params.http_port"
+	user_client_address  = "clients_params.user_client_address"
+	auth_client_address  = "clients_params.auth_client_address"
+	event_client_address = "clients_params.event_client_address"
 )
 
 // AppConfig представляет конфигурацию всего приложения
@@ -45,7 +43,7 @@ type ClientsParams struct {
 // EnvBindings возвращает мапу ключей конфигурации и соответствующих им переменных окружения
 func envBindings() map[string]string {
 	return map[string]string{
-		envKey:               "SERVICE_KEY",
+		envKey:               "SERVICE_ENV",
 		secretKey:            "SECRET_KEY",
 		gateway_http_port:    "GATEWAY_HTTP_PORT",
 		event_client_address: "EVENT_CLIENT_ADDR",
