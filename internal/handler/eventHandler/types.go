@@ -103,3 +103,26 @@ func NewCategory(req *CreateCategoryReq) *Category {
 		UpdatedAt: time.Now(),
 	}
 }
+
+// SuggestionRequest представляет запрос на автокомплит
+type SuggestionRequest struct {
+	Query      string   `json:"query"`       // Что пользователь начал печатать
+	MaxResults int      `json:"max_results"` // Максимум предложений (по умолчанию 10)
+	Fields     []string `json:"fields"`      // В каких полях искать (name, location, etc.)
+}
+
+// SuggestionResponse представляет ответ с предложениями
+type SuggestionResponse struct {
+	Suggestions []Suggestion `json:"suggestions"`
+	Query       string       `json:"query"`
+	Total       int          `json:"total"`
+}
+
+// Suggestion одно предложение
+type Suggestion struct {
+	Text     string  `json:"text"`               // Предлагаемый текст
+	Score    float64 `json:"score"`              // Релевантность (0-1)
+	Type     string  `json:"type"`               // Тип: "event", "location", "category"
+	Category string  `json:"category,omitempty"` // Категория если type="event"
+	EventID  *int64  `json:"event_id,omitempty"` // ID события если type="event"
+}

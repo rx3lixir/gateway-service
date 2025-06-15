@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	pbEvent "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/event"
@@ -17,6 +18,84 @@ type eventHandler struct {
 	eventClient pbEvent.EventServiceClient
 	tokenMaker  *token.JWTMaker
 	logger      logger.Logger
+}
+
+// handleGetSuggestions обрабатывает запросы автокомплита
+func (h *eventHandler) handleGetSuggestions(w http.ResponseWriter, r *http.Request) error {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		return WriteJSON(w, http.StatusOK, &SuggestionResponse{
+			Suggestions: []Suggestion{},
+			Query:       "",
+			Total:       0,
+		})
+	}
+
+	// Парсим дополнительные параметры
+	maxResults := 10
+	if mr := r.URL.Query().Get("max_results"); mr != "" {
+		if parsed, err := strconv.Atoi(mr); err == nil && parsed > 0 {
+			maxResults = parsed
+		}
+	}
+
+	fields := []string{"name", "location"}
+	if f := r.URL.Query().Get("fields"); f != "" {
+		fields = strings.Split(f, ",")
+	}
+
+	h.logger.InfoContext(r.Context(), "Handling suggestion request",
+		"query", query,
+		"max_results", maxResults,
+		"fields", fields)
+
+	grpcCtx, cancel := h.createContext(r)
+	defer cancel()
+
+	// Создаем gRPC запрос
+	req := &pbEvent.SuggestionReq{
+		Query:      query,
+		MaxResults: int32(maxResults),
+		Fields:     fields,
+	}
+
+	res, err := h.eventClient.GetSuggestions(grpcCtx, req)
+	if err != nil {
+		h.logger.ErrorContext(grpcCtx, "Failed to get suggestions via gRPC", "error", err)
+		return err
+	}
+
+	// Конвертируем в HTTP ответ
+	suggestions := make([]Suggestion, 0, len(res.GetSuggestions()))
+	for _, item := range res.GetSuggestions() {
+		suggestion := Suggestion{
+			Text:  item.GetText(),
+			Score: item.GetScore(),
+			Type:  item.GetType(),
+		}
+
+		if item.Category != nil {
+			suggestion.Category = *item.Category
+		}
+
+		if item.EventId != nil {
+			suggestion.EventID = item.EventId
+		}
+
+		suggestions = append(suggestions, suggestion)
+	}
+
+	response := &SuggestionResponse{
+		Suggestions: suggestions,
+		Query:       res.GetQuery(),
+		Total:       int(res.GetTotal()),
+	}
+
+	h.logger.InfoContext(grpcCtx, "Suggestions retrieved successfully",
+		"query", query,
+		"suggestions_count", len(suggestions))
+
+	return WriteJSON(w, http.StatusOK, response)
 }
 
 // handleGetEventByID возвращает событие с переданным id
@@ -384,7 +463,7 @@ func NewEventHandler(eventClient pbEvent.EventServiceClient, secretKey string, l
 	}
 }
 
-// handleGetEvents возвращает информацию обо всех событиях с поддержкой фильтрации
+// handleGetEvents возвращает информацию обо всех событиях с поддержкой фильтрации и полнотекстового поиска
 func (h *eventHandler) handleGetEvents(w http.ResponseWriter, r *http.Request) error {
 	h.logger.InfoContext(r.Context(), "Handling request to list events with filters")
 
@@ -395,7 +474,7 @@ func (h *eventHandler) handleGetEvents(w http.ResponseWriter, r *http.Request) e
 		return fmt.Errorf("invalid query parameters: %w", err)
 	}
 
-	// Логируем полученные фильтры
+	// Детальное логирование полученных фильтров (включая поиск)
 	h.logger.InfoContext(r.Context(), "Parsed event filters",
 		"category_ids", filterReq.CategoryIDs,
 		"min_price", filterReq.MinPrice,
@@ -417,7 +496,17 @@ func (h *eventHandler) handleGetEvents(w http.ResponseWriter, r *http.Request) e
 	// Конвертируем HTTP запрос в gRPC запрос
 	protoReq := HTTPListReqToProtoListReq(filterReq)
 
-	h.logger.InfoContext(grpcCtx, "Sending ListEvents request to gRPC service with filters")
+	// Логируем, есть ли поисковый запрос
+	hasSearch := filterReq.SearchText != nil && *filterReq.SearchText != ""
+	h.logger.InfoContext(grpcCtx, "Sending ListEvents request to gRPC service",
+		"has_search", hasSearch,
+		"search_text", func() string {
+			if hasSearch {
+				return *filterReq.SearchText
+			}
+			return ""
+		}())
+
 	res, err := h.eventClient.ListEvents(grpcCtx, protoReq)
 	if err != nil {
 		h.logger.ErrorContext(grpcCtx, "Failed to list events via gRPC", "error", err)
@@ -428,11 +517,27 @@ func (h *eventHandler) handleGetEvents(w http.ResponseWriter, r *http.Request) e
 	if res != nil && res.Events != nil {
 		eventsCount = len(res.Events)
 	}
-	h.logger.InfoContext(grpcCtx, "Received events from gRPC service", "count", eventsCount)
+
+	// Логируем результат поиска
+	if hasSearch {
+		h.logger.InfoContext(grpcCtx, "Search results received from gRPC service",
+			"search_text", *filterReq.SearchText,
+			"events_found", eventsCount,
+			"has_pagination", res.GetPagination() != nil)
+	} else {
+		h.logger.InfoContext(grpcCtx, "Filtered events received from gRPC service",
+			"events_count", eventsCount,
+			"has_filters", len(filterReq.CategoryIDs) > 0 || filterReq.MinPrice != nil || filterReq.MaxPrice != nil,
+			"has_pagination", res.GetPagination() != nil)
+	}
 
 	// Если результат получен, но в нем пусто
 	if res != nil && (res.Events == nil || len(res.Events) == 0) {
-		h.logger.InfoContext(grpcCtx, "No events found")
+		if hasSearch {
+			h.logger.InfoContext(grpcCtx, "No events found for search query", "search_text", *filterReq.SearchText)
+		} else {
+			h.logger.InfoContext(grpcCtx, "No events found with current filters")
+		}
 		return WriteJSON(w, http.StatusOK, &ListEventsRes{
 			Events: []*Event{},
 		})
@@ -462,7 +567,7 @@ func (h *eventHandler) handleGetEventsAdvanced(w http.ResponseWriter, r *http.Re
 	}
 	defer r.Body.Close()
 
-	// Логируем полученные фильтры
+	// Детальное логирование полученных фильтров
 	h.logger.InfoContext(r.Context(), "Parsed advanced event filters",
 		"category_ids", filterReq.CategoryIDs,
 		"min_price", filterReq.MinPrice,
@@ -484,7 +589,16 @@ func (h *eventHandler) handleGetEventsAdvanced(w http.ResponseWriter, r *http.Re
 	// Конвертируем HTTP запрос в gRPC запрос
 	protoReq := HTTPListReqToProtoListReq(&filterReq)
 
-	h.logger.InfoContext(grpcCtx, "Sending advanced ListEvents request to gRPC service")
+	hasSearch := filterReq.SearchText != nil && *filterReq.SearchText != ""
+	h.logger.InfoContext(grpcCtx, "Sending advanced ListEvents request to gRPC service",
+		"has_search", hasSearch,
+		"search_text", func() string {
+			if hasSearch {
+				return *filterReq.SearchText
+			}
+			return ""
+		}())
+
 	res, err := h.eventClient.ListEvents(grpcCtx, protoReq)
 	if err != nil {
 		h.logger.ErrorContext(grpcCtx, "Failed to list events via gRPC", "error", err)
@@ -494,10 +608,18 @@ func (h *eventHandler) handleGetEventsAdvanced(w http.ResponseWriter, r *http.Re
 	// Конвертируем Proto ответ в HTTP ответ
 	httpResponse := ProtoListResToHTTPListRes(res)
 
-	h.logger.InfoContext(grpcCtx, "Advanced events request completed",
-		"events_count", len(httpResponse.Events),
-		"has_pagination", httpResponse.Pagination != nil,
-	)
+	if hasSearch {
+		h.logger.InfoContext(grpcCtx, "Advanced search request completed",
+			"search_text", *filterReq.SearchText,
+			"events_count", len(httpResponse.Events),
+			"has_pagination", httpResponse.Pagination != nil,
+		)
+	} else {
+		h.logger.InfoContext(grpcCtx, "Advanced filter request completed",
+			"events_count", len(httpResponse.Events),
+			"has_pagination", httpResponse.Pagination != nil,
+		)
+	}
 
 	return WriteJSON(w, http.StatusOK, httpResponse)
 }

@@ -68,6 +68,9 @@ proto-gen-auth: ## Generate auth protobuf
   --go-grpc_opt=paths=source_relative \
   gateway-grpc/proto/auth/auth-service.proto
 
+proto-gen-all: proto-gen-event proto-gen-user proto-gen-auth ## Generate all protobuf files
+	@echo "✅ All protobuf files generated successfully"
+
 # ============================================================================
 # TESTING
 # ============================================================================

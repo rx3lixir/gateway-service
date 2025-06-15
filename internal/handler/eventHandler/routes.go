@@ -24,7 +24,10 @@ func RegisterRoutes(e *eventHandler) *chi.Mux {
 		// События: без аутентификации
 		r.Get("/events", e.makeHTTPHandlerFunc(e.handleGetEvents))
 		r.Get("/events/{id}", e.makeHTTPHandlerFunc(e.handleGetEventByID))
+
+		// Поиск : без аутентификации
 		r.Post("/events/search", e.makeHTTPHandlerFunc(e.handleGetEventsAdvanced))
+		r.Get("/events/suggestions", e.makeHTTPHandlerFunc(e.handleGetSuggestions))
 
 		// Категории: без аутентификации
 		r.Get("/categories", e.makeHTTPHandlerFunc(e.handleListCategories))
