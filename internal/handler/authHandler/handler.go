@@ -10,7 +10,7 @@ import (
 	pbAuth "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/auth"
 	pbUser "github.com/rx3lixir/gateway-service/gateway-grpc/gen/go/user"
 
-	contextkeys "github.com/rx3lixir/gateway-service/pkg/contextKeys"
+	contextkeys "github.com/rx3lixir/gateway-service/pkg/context"
 	"github.com/rx3lixir/gateway-service/pkg/logger"
 	"github.com/rx3lixir/gateway-service/pkg/password"
 	"github.com/rx3lixir/gateway-service/pkg/token"

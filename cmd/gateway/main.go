@@ -53,6 +53,18 @@ func main() {
 		"http_port", c.Server.HTTPPort,
 	)
 
+	// Для отслеживания соединений
+	var connections []*grpc.ClientConn
+
+	// Для закрытия всех соединений при ошибке
+	cleanupConnections := func() {
+		for _, conn := range connections {
+			if conn != nil {
+				conn.Close()
+			}
+		}
+	}
+
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
@@ -63,26 +75,30 @@ func main() {
 		log.Error("Failed to connect to auth service", "error", err)
 		os.Exit(1)
 	}
-	defer authMcsConn.Close()
+	connections = append(connections, authMcsConn)
 	log.Info("Connected to gRPC auth service")
 
 	// Соединяемся с сервисом пользователей
 	userMcsConn, err := grpc.NewClient(c.Clients.UserClientAddress, opts...)
 	if err != nil {
 		log.Error("Failed to connect to user service", "error", err)
+		cleanupConnections()
 		os.Exit(1)
 	}
-	defer userMcsConn.Close()
+	connections = append(connections, userMcsConn)
 	log.Info("Connected to gRPC user service")
 
 	// Соединяемся с сервисом событий
 	eventMcsConn, err := grpc.NewClient(c.Clients.EventClientAddress, opts...)
 	if err != nil {
 		log.Error("Failed to connect to event service", "error", err)
+		cleanupConnections()
 		os.Exit(1)
 	}
-	defer eventMcsConn.Close()
+	connections = append(connections, eventMcsConn)
 	log.Info("Connected to gRPC event service")
+
+	defer cleanupConnections()
 
 	// Создание gRPC клиентов
 	eventClient := pbEvent.NewEventServiceClient(eventMcsConn)

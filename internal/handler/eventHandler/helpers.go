@@ -5,6 +5,8 @@ import (
 	"google.golang.org/grpc/codes"  // Для кодов gRPC ошибо
 	"google.golang.org/grpc/status" // Для обработки gRPC ошибок
 
+	contextpkg "github.com/rx3lixir/gateway-service/pkg/context"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,18 +21,9 @@ type APIError struct {
 	Error string `json:"error"`
 }
 
-// parseInt64 преобразует строку в int64 для использования в запросах
-func parseInt64(s string) (int64, error) {
-	i, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	return i, nil
-}
-
 // WriteJSON отправляет данные в формате JSON с указанным HTTP статусом.
 // Автоматически устанавливает правильный Content-Type заголовок.
-func WriteJSON(w http.ResponseWriter, statusCode int, data interface{}) error {
+func WriteJSON(w http.ResponseWriter, statusCode int, data any) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	if data == nil && (statusCode == http.StatusNoContent || statusCode == http.StatusAccepted) {
@@ -39,7 +32,7 @@ func WriteJSON(w http.ResponseWriter, statusCode int, data interface{}) error {
 	if data == nil && statusCode != http.StatusNoContent && statusCode != http.StatusAccepted {
 		// Для других статусов, если data nil, возвращаем пустой JSON объект или массив в зависимости от ожиданий
 		// Если ожидается объект:
-		data = map[string]interface{}{}
+		data = map[string]any{}
 		// Если ожидается массив (например, для списков, которые могут быть пустыми):
 		// if _, ok := data.([]interface{}); ok || (data == nil && strings.Contains(r.URL.Path, "events")) { // Простой пример для определения, когда нужен массив
 		// data = []interface{}{}
@@ -134,6 +127,5 @@ func parseIDFromURL(r *http.Request, paramName string) (int64, error) {
 
 // createContext создает дочерний контекст с таймаутом для gRPC вызова.
 func (h *eventHandler) createContext(r *http.Request) (context.Context, context.CancelFunc) {
-	// Установите подходящий таймаут для ваших gRPC вызовов
-	return context.WithTimeout(r.Context(), 5*time.Second)
+	return contextpkg.GRPCContextFromHTTP(r)
 }

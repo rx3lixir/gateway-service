@@ -1,4 +1,4 @@
-package contextkeys
+package context
 
 type AuthContextKey struct{}
 
