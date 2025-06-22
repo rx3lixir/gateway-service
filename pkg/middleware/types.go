@@ -47,7 +47,7 @@ func WriteJSON(w http.ResponseWriter, statusCode int, data any) error {
 // DefaultCORSConfig возвращает дефолтную CORS конфигурацию
 func DefaultCORSConfig() CORSConfig {
 	return CORSConfig{
-		AllowedOrigins:   []string{"http://localhost:3000"},
+		AllowedOrigins:   []string{"http://localhost:3000", "http://localhost:5173"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		AllowCredentials: true,
