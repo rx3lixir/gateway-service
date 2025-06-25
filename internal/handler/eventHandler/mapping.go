@@ -307,11 +307,11 @@ func IDToProtoDeleteCategoryReq(id int32) *pbEvent.DeleteCategoryReq {
 	return &pbEvent.DeleteCategoryReq{Id: id}
 }
 
-// ParseQueryParams парсит параметры запроса в ListEventsReq структуру
+// ИСПРАВЛЕНО: ParseQueryParams парсит параметры запроса в ListEventsReq структуру
 func ParseQueryParams(params map[string][]string) (*ListEventsReq, error) {
 	req := &ListEventsReq{}
 
-	// Парсим category_ids (может быть несколько)
+	// ИСПРАВЛЕНО: Парсим category_ids (может быть несколько)
 	if categoryIDs, ok := params["category_ids"]; ok && len(categoryIDs) > 0 {
 		var ids []int64
 		for _, idStr := range categoryIDs {
@@ -326,6 +326,28 @@ func ParseQueryParams(params map[string][]string) (*ListEventsReq, error) {
 		}
 		if len(ids) > 0 {
 			req.CategoryIDs = ids
+		}
+	}
+
+	// ИСПРАВЛЕНО: Также поддерживаем единичный category_id для обратной совместимости
+	if categoryID, ok := params["category_id"]; ok && len(categoryID) > 0 && categoryID[0] != "" {
+		if id, err := strconv.ParseInt(categoryID[0], 10, 64); err == nil {
+			// Если уже есть category_ids, добавляем к ним
+			if req.CategoryIDs == nil {
+				req.CategoryIDs = []int64{id}
+			} else {
+				// Проверяем что такого ID еще нет
+				found := false
+				for _, existingID := range req.CategoryIDs {
+					if existingID == id {
+						found = true
+						break
+					}
+				}
+				if !found {
+					req.CategoryIDs = append(req.CategoryIDs, id)
+				}
+			}
 		}
 	}
 
